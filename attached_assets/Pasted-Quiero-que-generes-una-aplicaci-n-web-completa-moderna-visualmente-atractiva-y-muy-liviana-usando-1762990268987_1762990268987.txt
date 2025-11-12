@@ -1,0 +1,68 @@
+Quiero que generes una aplicación web completa, moderna, visualmente atractiva y muy liviana, usando Python y Flask para el backend, HTML + TailwindCSS + Alpine.js para el frontend, y SQLite como base de datos.
+
+El sitio debe permitir registrar productos, consultar stock y precios, y registrar ventas de productos. Todo debe ser responsivo y rápido de navegar.
+
+---
+
+### 🧩 Tecnologías
+- Backend: Python 3 + Flask
+- Base de datos: SQLite (usando SQLAlchemy)
+- Frontend: HTML, TailwindCSS y Alpine.js
+- Estilo visual: moderno, minimalista y responsivo
+- Estructura clara: `/static`, `/templates`, `/db`, `/routes`, `/models`
+
+---
+
+### ⚙️ Funcionalidades
+
+#### 📦 Gestión de productos
+- Alta, baja y modificación de productos.
+- Campos: ID, título, descripción, precio unitario, cantidad en stock, imagen.
+- Permitir subir imagen de producto (almacenar localmente o en base64).
+- Al crear un producto nuevo, se agrega al stock automáticamente.
+
+#### 💰 Registro de ventas
+- Registrar una venta con:
+  - Fecha y hora automática
+  - Producto (seleccionable desde los productos existentes)
+  - Cantidad vendida
+  - Precio total (precio unitario × cantidad)
+- Al guardar la venta, se **descuenta automáticamente del stock** del producto.
+- Si la cantidad en stock no alcanza, mostrar un mensaje de error amigable.
+
+#### 📊 Consultas y reportes
+- Página para listar las ventas, con filtros:
+  - Por fecha (rango o día)
+  - Por producto
+  - Por monto mínimo/máximo
+- Página de productos con buscador y resaltado de productos con stock bajo.
+
+---
+
+### 🎨 Interfaz y UX
+- Diseño limpio con TailwindCSS, botones claros, formularios simples.
+- Layout con barra superior de navegación:
+  - “Productos”
+  - “Ventas”
+  - “Reportes”
+- Feedback visual en acciones (alertas o toasts simples con Alpine.js).
+
+---
+
+### 🧰 Requisitos extra
+- Todo debe correr en Replit sin configuraciones adicionales.
+- Comando principal: `python main.py`
+- Cargar la base SQLite automáticamente al iniciar (crear tablas si no existen).
+- Código ordenado y comentado.
+- Opcional: incluir un `requirements.txt` con dependencias mínimas (`Flask`, `SQLAlchemy`, `Werkzeug`).
+
+---
+
+🎯 **Objetivo**
+Crear una app web moderna y rápida que permita:
+1. Registrar productos con su stock e imagen.  
+2. Registrar ventas que descuentan stock automáticamente.  
+3. Consultar ventas con filtros.  
+4. Mostrar productos y stock actualizado.  
+
+Debe ser **liviana, ágil y moderna**, ideal para usar desde celular o computadora sin demoras.
