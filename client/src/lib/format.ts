@@ -33,19 +33,19 @@ export function formatNumber(value: number | string): string {
 }
 
 /**
- * Formatea un precio con símbolo de moneda (€)
- * Ejemplo: 1234.56 -> "1.234,56 €"
+ * Formatea un precio con símbolo de moneda ($)
+ * Ejemplo: 1234.56 -> "$ 1.234,56"
  */
 export function formatPrice(value: number | string, decimals: number = 2): string {
   const numValue = typeof value === 'string' ? parseFloat(value) : value;
   
   if (isNaN(numValue)) {
-    return '0,00 €';
+    return '$ 0,00';
   }
 
-  return new Intl.NumberFormat('es-ES', {
+  return new Intl.NumberFormat('es-AR', {
     style: 'currency',
-    currency: 'EUR',
+    currency: 'ARS',
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   }).format(numValue);
