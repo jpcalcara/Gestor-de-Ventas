@@ -1,7 +1,20 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, decimal, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, decimal, timestamp, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
+import { relations } from "drizzle-orm";
+
+export const users = pgTable("users", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").notNull().unique(),
+  password: text("password"),
+  firstName: text("first_name").notNull(),
+  lastName: text("last_name").notNull(),
+  role: text("role").notNull().default("user"),
+  avatar: text("avatar").default("default"),
+  googleId: text("google_id").unique(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
 
 export const products = pgTable("products", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -15,11 +28,87 @@ export const products = pgTable("products", {
 export const sales = pgTable("sales", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   productId: varchar("product_id").notNull().references(() => products.id),
+  userId: varchar("user_id").notNull().references(() => users.id),
   quantity: integer("quantity").notNull(),
   unitPrice: decimal("unit_price", { precision: 10, scale: 2 }).notNull(),
   totalPrice: decimal("total_price", { precision: 10, scale: 2 }).notNull(),
+  isEdited: boolean("is_edited").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at"),
+});
+
+export const passwordResetTokens = pgTable("password_reset_tokens", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  token: text("token").notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
+
+export const auditLogs = pgTable("audit_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  userName: text("user_name").notNull(),
+  actionType: text("action_type").notNull(),
+  entity: text("entity").notNull(),
+  entityId: text("entity_id"),
+  details: text("details"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const usersRelations = relations(users, ({ many }) => ({
+  sales: many(sales),
+  auditLogs: many(auditLogs),
+  passwordResetTokens: many(passwordResetTokens),
+}));
+
+export const passwordResetTokensRelations = relations(passwordResetTokens, ({ one }) => ({
+  user: one(users, {
+    fields: [passwordResetTokens.userId],
+    references: [users.id],
+  }),
+}));
+
+export const productsRelations = relations(products, ({ many }) => ({
+  sales: many(sales),
+}));
+
+export const salesRelations = relations(sales, ({ one }) => ({
+  product: one(products, {
+    fields: [sales.productId],
+    references: [products.id],
+  }),
+  user: one(users, {
+    fields: [sales.userId],
+    references: [users.id],
+  }),
+}));
+
+export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
+  user: one(users, {
+    fields: [auditLogs.userId],
+    references: [users.id],
+  }),
+}));
+
+export const insertUserSchema = createInsertSchema(users).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  email: z.string().email("Email inválido"),
+  firstName: z.string().min(1, "El nombre es requerido"),
+  lastName: z.string().min(1, "El apellido es requerido"),
+  password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres").optional(),
+  googleId: z.string().optional(),
+  role: z.enum(["admin", "user"]).default("user"),
+}).refine(
+  (data) => data.password || data.googleId,
+  {
+    message: "Debe proporcionar una contraseña o un Google ID",
+    path: ["password"],
+  }
+);
 
 export const insertProductSchema = createInsertSchema(products).omit({
   id: true,
@@ -33,17 +122,43 @@ export const insertProductSchema = createInsertSchema(products).omit({
 export const insertSaleSchema = createInsertSchema(sales).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
   unitPrice: true,
   totalPrice: true,
+  isEdited: true,
 }).extend({
   quantity: z.coerce.number().int().min(1, "La cantidad debe ser mayor a 0"),
   productId: z.string().min(1, "Debe seleccionar un producto"),
 });
 
-export type InsertProduct = z.infer<typeof insertProductSchema>;
+export const updateSaleSchema = z.object({
+  quantity: z.coerce.number().int().min(1, "La cantidad debe ser mayor a 0"),
+});
+
+export const insertPasswordResetTokenSchema = createInsertSchema(passwordResetTokens).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  userId: z.string().min(1, "El usuario es requerido"),
+  token: z.string().min(1, "El token es requerido"),
+});
+
+export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type User = typeof users.$inferSelect;
+export type InsertUser = z.infer<typeof insertUserSchema>;
 export type Product = typeof products.$inferSelect;
-export type InsertSale = z.infer<typeof insertSaleSchema>;
+export type InsertProduct = z.infer<typeof insertProductSchema>;
 export type Sale = typeof sales.$inferSelect;
+export type InsertSale = z.infer<typeof insertSaleSchema>;
+export type UpdateSale = z.infer<typeof updateSaleSchema>;
+export type AuditLog = typeof auditLogs.$inferSelect;
+export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+export type PasswordResetToken = typeof passwordResetTokens.$inferSelect;
+export type InsertPasswordResetToken = z.infer<typeof insertPasswordResetTokenSchema>;
 
 export type SaleWithProduct = Sale & {
   product: Product;

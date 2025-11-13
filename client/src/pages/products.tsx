@@ -208,7 +208,7 @@ export default function ProductsPage() {
       <DeleteProductDialog
         product={productToDelete}
         open={!!productToDelete}
-        onOpenChange={(open) => !open && setProductToDelete(null)}
+        onOpenChange={(open: boolean) => !open && setProductToDelete(null)}
         onSuccess={handleDeleteSuccess}
       />
     </div>

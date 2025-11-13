@@ -1,0 +1,126 @@
+Quiero que modifiques mi proyecto actual agregando un sistema completo de autenticación, roles de usuario y auditoría, con las siguientes características y reglas:
+
+🔐 1. Sistema de login y registro
+
+Implementar inicio de sesión con email y contraseña.
+
+Agregar también inicio de sesión con Google (SSO con Gmail).
+
+El registro de usuarios debe incluir los campos:
+
+nombre
+
+apellido
+
+email
+
+contraseña
+
+Solo el administrador puede crear nuevos usuarios desde el sistema (los usuarios comunes no pueden autoregistrarse).
+
+Agregar una opción de restablecer contraseña para cualquier usuario, que envíe el link al email registrado.
+
+👥 2. Roles de usuario
+
+Habrá dos tipos de roles:
+
+Administrador:
+
+Puede agregar, editar y eliminar productos.
+
+Puede agregar, editar y eliminar ventas.
+
+Puede acceder a la sección de reportes.
+
+Puede acceder a la nueva sección Histórico (auditoría).
+
+Puede modificar datos de otros usuarios, excepto el email y el nombre de usuario (solo el propio usuario puede cambiarlos).
+
+Usuario común:
+
+Puede registrar ventas nuevas.
+
+Puede editar sus propias ventas.
+
+No puede eliminar ventas.
+
+Cuando edita una venta, el registro debe mostrarse en rojo, indicando que fue modificado.
+
+No tiene acceso a reportes ni al histórico.
+
+🧭 3. Interfaz de usuario
+
+Al iniciar sesión, el usuario accede directamente a la sección Productos (como actualmente).
+
+En el header, a la derecha, debe mostrarse:
+
+el nombre del usuario logueado
+
+un avatar seleccionable (entre una lista básica de avatares)
+
+el rol (Administrador o Usuario común)
+
+una opción de cerrar sesión
+
+Mantener el diseño y estilo actual del proyecto.
+
+📊 4. Sección de Reportes
+
+Solo visible para el administrador.
+
+Mantener la estructura actual si ya existe, o crear una vista básica para mostrar reportes.
+
+🕓 5. Nueva sección: Histórico (auditoría)
+
+Nueva vista o pestaña visible solo para el administrador.
+
+Debe listar todas las acciones realizadas en el sistema, tanto en productos como en ventas.
+
+Cada registro debe incluir:
+
+tipo de acción (alta, baja, modificación)
+
+tipo de entidad (producto o venta)
+
+usuario que realizó la acción
+
+fecha y hora
+
+Solo lectura, sin filtros ni edición.
+
+⚙️ 6. Lógica y validaciones
+
+Validar los permisos en frontend y backend.
+
+Registrar cada acción en una colección o tabla de auditoría con los campos:
+id, userId, nombreUsuario, tipoAccion, entidad, detalles, timestamp.
+
+Si el proyecto usa React / Next.js / Node.js / Express / Firebase / MongoDB / SQL, adaptar según la tecnología actual.
+
+No es necesario un diseño complejo, solo la funcionalidad base.
+
+🧾 7. Resumen de permisos
+Acción	Admin	Usuario común
+Agregar productos	✅	❌
+Editar productos	✅	❌
+Eliminar productos	✅	❌
+Agregar ventas	✅	✅
+Editar ventas	✅	✅ (solo propias, mostrar en rojo)
+Eliminar ventas	✅	❌
+Ver reportes	✅	❌
+Ver histórico (auditoría)	✅	❌
+Crear usuarios	✅	❌
+Restablecer contraseña propia	✅	✅
+Cambiar datos de otros usuarios	✅ (excepto email/nombre)	❌
+🧩 8. Comportamiento general
+
+Al loguearse, se mantiene la sesión hasta cerrar o expirar el token.
+
+Al cerrar sesión, se redirige al login.
+
+Toda acción del usuario debe quedar registrada en el histórico.
+
+Los usuarios comunes no pueden ver ni acceder a secciones restringidas.
+
+💡 Si el proyecto está en React + Node.js + MongoDB (o Firebase), usar autenticación basada en JWT o Firebase Auth.
+Si es otro stack, adaptar a la tecnología usada, manteniendo la misma lógica funcional.
