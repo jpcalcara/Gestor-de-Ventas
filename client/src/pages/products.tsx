@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
-import { Plus, Search, Edit, Trash2, PackageX, Package, ChevronRight } from "lucide-react";
+import { useLocation } from "wouter";
+import { Plus, Search, Edit, Trash2, PackageX, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -14,6 +14,7 @@ import { formatPrice, formatNumber, isLowStock } from "@/lib/format";
 import type { Product } from "@shared/schema";
 
 export default function ProductsPage() {
+  const [, setLocation] = useLocation();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -135,34 +136,34 @@ export default function ProductsPage() {
               <Card key={product.id} className="hover-elevate" data-testid={`card-product-${product.id}`}>
                 <CardContent className="p-4">
                   <div className="flex items-center gap-4">
-                    {/* Imagen miniatura */}
-                    <Link href={`/products/${product.id}`}>
-                      <div className="h-16 w-16 rounded-md bg-muted flex-shrink-0 overflow-hidden cursor-pointer">
-                        {product.imageUrl ? (
-                          <img
-                            src={product.imageUrl}
-                            alt={product.title}
-                            className="w-full h-full object-cover"
-                            data-testid={`img-product-${product.id}`}
-                          />
-                        ) : (
-                          <div className="w-full h-full flex items-center justify-center">
-                            <Package className="h-8 w-8 text-muted-foreground" />
-                          </div>
-                        )}
-                      </div>
-                    </Link>
+                    {/* Imagen miniatura clickeable */}
+                    <div 
+                      className="h-16 w-16 rounded-md bg-muted flex-shrink-0 overflow-hidden cursor-pointer"
+                      onClick={() => setLocation(`/products/${product.id}`)}
+                    >
+                      {product.imageUrl ? (
+                        <img
+                          src={product.imageUrl}
+                          alt={product.title}
+                          className="w-full h-full object-cover"
+                          data-testid={`img-product-${product.id}`}
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <Package className="h-8 w-8 text-muted-foreground" />
+                        </div>
+                      )}
+                    </div>
 
                     {/* Información del producto */}
                     <div className="flex-1 min-w-0">
-                      <Link href={`/products/${product.id}`}>
-                        <h3 
-                          className="text-base font-semibold cursor-pointer hover:underline" 
-                          data-testid={`text-product-title-${product.id}`}
-                        >
-                          {product.title}
-                        </h3>
-                      </Link>
+                      <h3 
+                        className="text-base font-semibold cursor-pointer hover:underline" 
+                        data-testid={`text-product-title-${product.id}`}
+                        onClick={() => setLocation(`/products/${product.id}`)}
+                      >
+                        {product.title}
+                      </h3>
                       <div className="flex items-center gap-4 mt-1 flex-wrap">
                         <div>
                           <span className="text-sm text-muted-foreground">Precio: </span>
@@ -189,11 +190,6 @@ export default function ProductsPage() {
 
                     {/* Acciones */}
                     <div className="flex items-center gap-2 flex-shrink-0">
-                      <Link href={`/products/${product.id}`}>
-                        <Button variant="ghost" size="icon" data-testid={`button-view-${product.id}`}>
-                          <ChevronRight className="h-4 w-4" />
-                        </Button>
-                      </Link>
                       <Button
                         variant="outline"
                         size="icon"
