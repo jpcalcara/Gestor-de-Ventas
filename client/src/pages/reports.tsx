@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatPrice, formatNumber } from "@/lib/format";
 import type { SaleWithProduct, Product } from "@shared/schema";
 import { format } from "date-fns";
 
@@ -62,7 +63,7 @@ export default function ReportsPage() {
             <BarChart3 className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold" data-testid="text-total-sales">{filteredSales.length}</div>
+            <div className="text-2xl font-bold" data-testid="text-total-sales">{formatNumber(filteredSales.length)}</div>
             <p className="text-xs text-muted-foreground mt-1">Ventas registradas</p>
           </CardContent>
         </Card>
@@ -73,7 +74,7 @@ export default function ReportsPage() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold" data-testid="text-total-revenue">${totalRevenue.toFixed(2)}</div>
+            <div className="text-2xl font-bold" data-testid="text-total-revenue">{formatPrice(totalRevenue)}</div>
             <p className="text-xs text-muted-foreground mt-1">Monto acumulado</p>
           </CardContent>
         </Card>
@@ -84,7 +85,7 @@ export default function ReportsPage() {
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold" data-testid="text-total-items">{totalItems}</div>
+            <div className="text-2xl font-bold" data-testid="text-total-items">{formatNumber(totalItems)}</div>
             <p className="text-xs text-muted-foreground mt-1">Unidades vendidas</p>
           </CardContent>
         </Card>
@@ -223,13 +224,13 @@ export default function ReportsPage() {
                         {sale.product.title}
                       </TableCell>
                       <TableCell className="text-right" data-testid={`text-sale-quantity-${sale.id}`}>
-                        {sale.quantity}
+                        {formatNumber(sale.quantity)}
                       </TableCell>
                       <TableCell className="text-right font-mono" data-testid={`text-sale-unit-price-${sale.id}`}>
-                        ${Number(sale.unitPrice).toFixed(2)}
+                        {formatPrice(sale.unitPrice)}
                       </TableCell>
                       <TableCell className="text-right font-mono font-semibold" data-testid={`text-sale-total-${sale.id}`}>
-                        ${Number(sale.totalPrice).toFixed(2)}
+                        {formatPrice(sale.totalPrice)}
                       </TableCell>
                     </TableRow>
                   ))}

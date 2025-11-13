@@ -6,6 +6,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { Navigation } from "@/components/navigation";
 import ProductsPage from "@/pages/products";
+import ProductDetailPage from "@/pages/product-detail";
 import SalesPage from "@/pages/sales";
 import ReportsPage from "@/pages/reports";
 import LoginPage from "@/pages/login";
@@ -55,6 +56,9 @@ function Router() {
       </Route>
       <Route path="/">
         <ProtectedRoute component={ProductsPage} />
+      </Route>
+      <Route path="/products/:id">
+        <ProtectedRoute component={ProductDetailPage} />
       </Route>
       <Route path="/sales">
         <ProtectedRoute component={SalesPage} />

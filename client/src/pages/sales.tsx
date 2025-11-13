@@ -10,6 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
+import { formatPrice, formatNumber } from "@/lib/format";
 import { insertSaleSchema, type InsertSale, type Product } from "@shared/schema";
 
 export default function SalesPage() {
@@ -105,7 +106,7 @@ export default function SalesPage() {
                         <SelectContent>
                           {products?.map((product) => (
                             <SelectItem key={product.id} value={product.id} data-testid={`option-product-${product.id}`}>
-                              {product.title} (Stock: {product.stock})
+                              {product.title} (Stock: {formatNumber(product.stock)})
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -175,22 +176,22 @@ export default function SalesPage() {
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Stock disponible:</span>
-                    <span className="font-medium" data-testid="text-summary-stock">{selectedProduct.stock}</span>
+                    <span className="font-medium" data-testid="text-summary-stock">{formatNumber(selectedProduct.stock)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Precio unitario:</span>
-                    <span className="font-medium" data-testid="text-summary-unit-price">${unitPrice.toFixed(2)}</span>
+                    <span className="font-medium" data-testid="text-summary-unit-price">{formatPrice(unitPrice)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span className="text-muted-foreground">Cantidad:</span>
-                    <span className="font-medium" data-testid="text-summary-quantity">{quantity || 0}</span>
+                    <span className="font-medium" data-testid="text-summary-quantity">{formatNumber(quantity || 0)}</span>
                   </div>
                 </div>
                 <div className="pt-4 border-t">
                   <div className="flex justify-between items-center">
                     <span className="text-base font-semibold">Total:</span>
                     <span className="text-2xl font-bold text-primary" data-testid="text-summary-total">
-                      ${totalPrice.toFixed(2)}
+                      {formatPrice(totalPrice)}
                     </span>
                   </div>
                 </div>
@@ -198,7 +199,7 @@ export default function SalesPage() {
                   <div className="p-3 bg-muted rounded-md">
                     <p className="text-sm text-muted-foreground">
                       Stock después de la venta: <span className="font-medium text-foreground" data-testid="text-stock-after-sale">
-                        {Math.max(0, selectedProduct.stock - (Number(quantity) || 0))}
+                        {formatNumber(Math.max(0, selectedProduct.stock - (Number(quantity) || 0)))}
                       </span>
                     </p>
                   </div>

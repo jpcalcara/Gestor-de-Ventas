@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Plus, Search, Edit, Trash2, PackageX, Package } from "lucide-react";
+import { Link } from "wouter";
+import { Plus, Search, Edit, Trash2, PackageX, Package, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardFooter, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { ProductForm } from "@/components/product-form";
 import { DeleteProductDialog } from "@/components/delete-product-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import { formatPrice, formatNumber, isLowStock } from "@/lib/format";
 import type { Product } from "@shared/schema";
 
 export default function ProductsPage() {
@@ -87,16 +89,18 @@ export default function ProductsPage() {
       </div>
 
       {isLoading ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="space-y-2">
           {[1, 2, 3].map((i) => (
             <Card key={i}>
-              <CardHeader className="p-0">
-                <Skeleton className="aspect-square w-full rounded-t-lg" />
-              </CardHeader>
-              <CardContent className="p-4 space-y-2">
-                <Skeleton className="h-6 w-3/4" />
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-2/3" />
+              <CardContent className="p-4">
+                <div className="flex items-center gap-4">
+                  <Skeleton className="h-16 w-16 rounded-md flex-shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <Skeleton className="h-5 w-2/3" />
+                    <Skeleton className="h-4 w-1/3" />
+                  </div>
+                  <Skeleton className="h-6 w-24" />
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -124,67 +128,91 @@ export default function ProductsPage() {
           </div>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className="space-y-2">
           {filteredProducts.map((product) => {
-            const isLowStock = Number(product.stock) < 10;
+            const lowStock = isLowStock(product.stock);
             return (
-              <Card key={product.id} className="overflow-hidden hover-elevate" data-testid={`card-product-${product.id}`}>
-                <CardHeader className="p-0">
-                  <div className="aspect-square bg-muted relative">
-                    {product.imageUrl ? (
-                      <img
-                        src={product.imageUrl}
-                        alt={product.title}
-                        className="w-full h-full object-cover"
-                        data-testid={`img-product-${product.id}`}
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Package className="h-16 w-16 text-muted-foreground" />
+              <Card key={product.id} className="hover-elevate" data-testid={`card-product-${product.id}`}>
+                <CardContent className="p-4">
+                  <div className="flex items-center gap-4">
+                    {/* Imagen miniatura */}
+                    <Link href={`/products/${product.id}`}>
+                      <div className="h-16 w-16 rounded-md bg-muted flex-shrink-0 overflow-hidden cursor-pointer">
+                        {product.imageUrl ? (
+                          <img
+                            src={product.imageUrl}
+                            alt={product.title}
+                            className="w-full h-full object-cover"
+                            data-testid={`img-product-${product.id}`}
+                          />
+                        ) : (
+                          <div className="w-full h-full flex items-center justify-center">
+                            <Package className="h-8 w-8 text-muted-foreground" />
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
-                </CardHeader>
-                <CardContent className="p-4 space-y-3">
-                  <div>
-                    <h3 className="text-lg font-semibold line-clamp-1" data-testid={`text-product-title-${product.id}`}>
-                      {product.title}
-                    </h3>
-                    <p className="text-sm text-muted-foreground line-clamp-2 mt-1" data-testid={`text-product-description-${product.id}`}>
-                      {product.description}
-                    </p>
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <div>
-                      <p className="text-xl font-bold" data-testid={`text-product-price-${product.id}`}>
-                        ${Number(product.price).toFixed(2)}
-                      </p>
+                    </Link>
+
+                    {/* Información del producto */}
+                    <div className="flex-1 min-w-0">
+                      <Link href={`/products/${product.id}`}>
+                        <h3 
+                          className="text-base font-semibold cursor-pointer hover:underline" 
+                          data-testid={`text-product-title-${product.id}`}
+                        >
+                          {product.title}
+                        </h3>
+                      </Link>
+                      <div className="flex items-center gap-4 mt-1 flex-wrap">
+                        <div>
+                          <span className="text-sm text-muted-foreground">Precio: </span>
+                          <span className="text-sm font-semibold" data-testid={`text-product-price-${product.id}`}>
+                            {formatPrice(product.price)}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-sm text-muted-foreground">Stock: </span>
+                          <span 
+                            className={`text-sm font-semibold ${lowStock ? "text-destructive" : ""}`}
+                            data-testid={`text-product-stock-${product.id}`}
+                          >
+                            {formatNumber(product.stock)}
+                          </span>
+                          {lowStock && (
+                            <Badge variant="destructive" className="ml-2" data-testid={`badge-low-stock-${product.id}`}>
+                              Stock Bajo
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
                     </div>
-                    <Badge variant={isLowStock ? "destructive" : "secondary"} data-testid={`badge-stock-${product.id}`}>
-                      {isLowStock && "⚠ "}Stock: {product.stock}
-                    </Badge>
+
+                    {/* Acciones */}
+                    <div className="flex items-center gap-2 flex-shrink-0">
+                      <Link href={`/products/${product.id}`}>
+                        <Button variant="ghost" size="icon" data-testid={`button-view-${product.id}`}>
+                          <ChevronRight className="h-4 w-4" />
+                        </Button>
+                      </Link>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => handleEdit(product)}
+                        data-testid={`button-edit-${product.id}`}
+                      >
+                        <Edit className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="icon"
+                        onClick={() => handleDelete(product)}
+                        data-testid={`button-delete-${product.id}`}
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 </CardContent>
-                <CardFooter className="p-4 pt-0 flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="flex-1"
-                    onClick={() => handleEdit(product)}
-                    data-testid={`button-edit-${product.id}`}
-                  >
-                    <Edit className="h-4 w-4 mr-2" />
-                    Editar
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDelete(product)}
-                    data-testid={`button-delete-${product.id}`}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </CardFooter>
               </Card>
             );
           })}
