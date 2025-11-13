@@ -32,6 +32,7 @@ export interface IStorage {
   getSale(id: string): Promise<Sale | undefined>;
   createSale(sale: InsertSale & { userId: string }): Promise<Sale>;
   updateSale(id: string, updates: UpdateSale): Promise<Sale | undefined>;
+  deleteSale(id: string): Promise<boolean>;
   
   updateProductStock(productId: string, quantity: number): Promise<Product | undefined>;
   
@@ -220,6 +221,11 @@ export class DatabaseStorage implements IStorage {
 
       return updated;
     });
+  }
+
+  async deleteSale(id: string): Promise<boolean> {
+    const result = await db.delete(sales).where(eq(sales.id, id));
+    return result.rowCount !== null && result.rowCount > 0;
   }
 
   async updateProductStock(productId: string, quantityChange: number): Promise<Product | undefined> {
