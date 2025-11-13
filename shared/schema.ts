@@ -110,6 +110,11 @@ export const insertUserSchema = createInsertSchema(users).omit({
   }
 );
 
+export const loginSchema = z.object({
+  email: z.string().email("Email inválido").min(1, "El email es requerido"),
+  password: z.string().min(1, "La contraseña es requerida"),
+});
+
 export const insertProductSchema = createInsertSchema(products).omit({
   id: true,
 }).extend({
