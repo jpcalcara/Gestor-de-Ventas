@@ -134,11 +134,14 @@ export function Navigation() {
             />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="ghost" className="relative h-9 w-9 rounded-full" data-testid="button-user-menu">
-                  <Avatar className="h-9 w-9">
+                <Button variant="ghost" className="relative h-auto gap-2 px-2" data-testid="button-user-menu">
+                  <Avatar className="h-8 w-8">
                     <AvatarImage src={user?.profileImageUrl || undefined} alt={user?.firstName || "Usuario"} />
                     <AvatarFallback>{getInitials()}</AvatarFallback>
                   </Avatar>
+                  <span className="hidden md:inline text-sm font-medium" data-testid="text-user-name">
+                    {user?.firstName} {user?.lastName}
+                  </span>
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-56">
