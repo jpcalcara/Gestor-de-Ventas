@@ -1,75 +1,107 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { BarChart3, Calendar, DollarSign, Package } from "lucide-react";
+import { Calendar, DollarSign, Package, User, CreditCard, Banknote, Smartphone, ArrowRightLeft, ShoppingCart } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
 import { formatPrice, formatNumber } from "@/lib/format";
-import type { SaleWithProduct, Product } from "@shared/schema";
-import { format } from "date-fns";
+import type { SaleOrderWithItems, Product } from "@shared/schema";
+import { format, isToday, parseISO, startOfDay, endOfDay } from "date-fns";
+import { es } from "date-fns/locale";
+
+const paymentMethodLabels: Record<string, string> = {
+  efectivo: "Efectivo",
+  debito: "Débito",
+  credito: "Crédito",
+  qr: "QR",
+  transferencia: "Transferencia",
+};
+
+const paymentMethodIcons: Record<string, typeof CreditCard> = {
+  efectivo: Banknote,
+  debito: CreditCard,
+  credito: CreditCard,
+  qr: Smartphone,
+  transferencia: ArrowRightLeft,
+};
 
 export default function ReportsPage() {
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const today = format(new Date(), "yyyy-MM-dd");
+  const [selectedDate, setSelectedDate] = useState(today);
   const [selectedProductId, setSelectedProductId] = useState<string>("all");
-  const [minPrice, setMinPrice] = useState("");
-  const [maxPrice, setMaxPrice] = useState("");
 
-  const { data: sales, isLoading: salesLoading } = useQuery<SaleWithProduct[]>({
-    queryKey: ["/api/sales"],
+  const { data: saleOrders, isLoading: ordersLoading } = useQuery<SaleOrderWithItems[]>({
+    queryKey: ["/api/sale-orders"],
   });
 
   const { data: products } = useQuery<Product[]>({
     queryKey: ["/api/products"],
   });
 
-  const filteredSales = sales?.filter(sale => {
-    if (dateFrom && new Date(sale.createdAt) < new Date(dateFrom)) return false;
-    if (dateTo && new Date(sale.createdAt) > new Date(dateTo + "T23:59:59")) return false;
-    if (selectedProductId !== "all" && sale.productId !== selectedProductId) return false;
-    if (minPrice && Number(sale.totalPrice) < Number(minPrice)) return false;
-    if (maxPrice && Number(sale.totalPrice) > Number(maxPrice)) return false;
-    return true;
-  }) || [];
+  const filteredOrders = useMemo(() => {
+    if (!saleOrders) return [];
 
-  const totalRevenue = filteredSales.reduce((sum, sale) => sum + Number(sale.totalPrice), 0);
-  const totalItems = filteredSales.reduce((sum, sale) => sum + sale.quantity, 0);
+    return saleOrders.filter(order => {
+      const orderDate = new Date(order.createdAt);
+      
+      if (selectedDate) {
+        const filterDate = parseISO(selectedDate);
+        const orderStart = startOfDay(orderDate);
+        const filterStart = startOfDay(filterDate);
+        if (orderStart.getTime() !== filterStart.getTime()) return false;
+      }
+
+      if (selectedProductId !== "all") {
+        const hasProduct = order.items.some(item => item.productId === selectedProductId);
+        if (!hasProduct) return false;
+      }
+
+      return true;
+    });
+  }, [saleOrders, selectedDate, selectedProductId]);
+
+  const totalRevenue = filteredOrders.reduce((sum, order) => sum + Number(order.totalAmount), 0);
+  const totalItems = filteredOrders.reduce((sum, order) => 
+    sum + order.items.reduce((itemSum, item) => itemSum + Number(item.quantity), 0), 0
+  );
 
   const clearFilters = () => {
-    setDateFrom("");
-    setDateTo("");
+    setSelectedDate(today);
     setSelectedProductId("all");
-    setMinPrice("");
-    setMaxPrice("");
   };
 
-  const hasActiveFilters = dateFrom || dateTo || selectedProductId !== "all" || minPrice || maxPrice;
+  const hasActiveFilters = selectedDate !== today || selectedProductId !== "all";
+
+  const PaymentIcon = ({ method }: { method: string }) => {
+    const Icon = paymentMethodIcons[method] || CreditCard;
+    return <Icon className="h-4 w-4" />;
+  };
 
   return (
     <div className="container mx-auto px-4 md:px-8 py-6 md:py-8 space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold" data-testid="text-page-title">Reportes de Ventas</h1>
-        <p className="text-sm text-muted-foreground mt-1">Visualiza y filtra el historial de ventas</p>
+        <h1 className="text-2xl font-semibold" data-testid="text-page-title">Ventas</h1>
+        <p className="text-sm text-muted-foreground mt-1">Historial de ventas realizadas</p>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Ventas</CardTitle>
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            <ShoppingCart className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold" data-testid="text-total-sales">{formatNumber(filteredSales.length)}</div>
+            <div className="text-2xl font-bold" data-testid="text-total-sales">{formatNumber(filteredOrders.length)}</div>
             <p className="text-xs text-muted-foreground mt-1">Ventas registradas</p>
           </CardContent>
         </Card>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Ingresos Totales</CardTitle>
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -80,7 +112,7 @@ export default function ReportsPage() {
         </Card>
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Productos Vendidos</CardTitle>
             <Package className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
@@ -96,26 +128,15 @@ export default function ReportsPage() {
           <CardTitle>Filtros</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="date-from">Fecha desde</Label>
+              <Label htmlFor="date-filter">Fecha</Label>
               <Input
-                id="date-from"
+                id="date-filter"
                 type="date"
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
-                data-testid="input-date-from"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="date-to">Fecha hasta</Label>
-              <Input
-                id="date-to"
-                type="date"
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
-                data-testid="input-date-to"
+                value={selectedDate}
+                onChange={(e) => setSelectedDate(e.target.value)}
+                data-testid="input-date-filter"
               />
             </div>
 
@@ -136,34 +157,6 @@ export default function ReportsPage() {
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="min-price">Precio mínimo</Label>
-              <Input
-                id="min-price"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="$0.00"
-                value={minPrice}
-                onChange={(e) => setMinPrice(e.target.value)}
-                data-testid="input-min-price"
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="max-price">Precio máximo</Label>
-              <Input
-                id="max-price"
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder="$0.00"
-                value={maxPrice}
-                onChange={(e) => setMaxPrice(e.target.value)}
-                data-testid="input-max-price"
-              />
-            </div>
-
             <div className="space-y-2 flex items-end">
               <Button
                 variant="outline"
@@ -181,20 +174,22 @@ export default function ReportsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Historial de Ventas</CardTitle>
+          <CardTitle>
+            {selectedDate === today ? "Ventas de Hoy" : `Ventas del ${format(parseISO(selectedDate), "d 'de' MMMM", { locale: es })}`}
+          </CardTitle>
         </CardHeader>
         <CardContent>
-          {salesLoading ? (
-            <div className="space-y-2">
+          {ordersLoading ? (
+            <div className="space-y-4">
               {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-12 w-full" />
+                <Skeleton key={i} className="h-24 w-full" />
               ))}
             </div>
-          ) : filteredSales.length === 0 ? (
+          ) : filteredOrders.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-base font-medium" data-testid="text-no-sales">
-                {hasActiveFilters ? "No se encontraron ventas" : "No hay ventas registradas"}
+                {hasActiveFilters ? "No se encontraron ventas" : "No hay ventas hoy"}
               </h3>
               <p className="text-sm text-muted-foreground mt-1 max-w-sm">
                 {hasActiveFilters
@@ -203,39 +198,61 @@ export default function ReportsPage() {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Fecha</TableHead>
-                    <TableHead>Producto</TableHead>
-                    <TableHead className="text-right">Cantidad</TableHead>
-                    <TableHead className="text-right">Precio Unit.</TableHead>
-                    <TableHead className="text-right">Total</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredSales.map((sale) => (
-                    <TableRow key={sale.id} data-testid={`row-sale-${sale.id}`}>
-                      <TableCell data-testid={`text-sale-date-${sale.id}`}>
-                        {format(new Date(sale.createdAt), "dd/MM/yyyy HH:mm")}
-                      </TableCell>
-                      <TableCell data-testid={`text-sale-product-${sale.id}`}>
-                        {sale.product.title}
-                      </TableCell>
-                      <TableCell className="text-right" data-testid={`text-sale-quantity-${sale.id}`}>
-                        {formatNumber(sale.quantity)}
-                      </TableCell>
-                      <TableCell className="text-right font-mono" data-testid={`text-sale-unit-price-${sale.id}`}>
-                        {formatPrice(sale.unitPrice)}
-                      </TableCell>
-                      <TableCell className="text-right font-mono font-semibold" data-testid={`text-sale-total-${sale.id}`}>
-                        {formatPrice(sale.totalPrice)}
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+            <div className="space-y-4">
+              {filteredOrders.map((order) => (
+                <Card key={order.id} className="overflow-hidden" data-testid={`card-sale-order-${order.id}`}>
+                  <div className="p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-4 mb-3">
+                      <div className="flex items-center gap-3">
+                        <div className="flex items-center gap-2 text-muted-foreground">
+                          <User className="h-4 w-4" />
+                          <span className="font-medium text-foreground" data-testid={`text-vendor-name-${order.id}`}>
+                            {order.user?.firstName} {order.user?.lastName}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <Badge variant="secondary" className="flex items-center gap-1" data-testid={`badge-payment-${order.id}`}>
+                          <PaymentIcon method={order.paymentMethod} />
+                          {paymentMethodLabels[order.paymentMethod] || order.paymentMethod}
+                        </Badge>
+                        <span className="text-sm text-muted-foreground" data-testid={`text-sale-time-${order.id}`}>
+                          {format(new Date(order.createdAt), "HH:mm")}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2 mb-3">
+                      {order.items.map((item, index) => (
+                        <div 
+                          key={item.id} 
+                          className="flex items-center justify-between text-sm py-1"
+                          data-testid={`item-${order.id}-${index}`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="text-muted-foreground">
+                              {formatNumber(Number(item.quantity))} {item.unitType === "unidad" ? "u" : item.unitType}
+                            </span>
+                            <span>{item.product.title}</span>
+                          </div>
+                          <span className="font-mono text-muted-foreground">
+                            {formatPrice(item.totalPrice)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex items-center justify-between pt-3 border-t">
+                      <span className="text-sm text-muted-foreground">
+                        {order.items.length} {order.items.length === 1 ? "producto" : "productos"}
+                      </span>
+                      <span className="text-lg font-semibold font-mono" data-testid={`text-order-total-${order.id}`}>
+                        {formatPrice(order.totalAmount)}
+                      </span>
+                    </div>
+                  </div>
+                </Card>
+              ))}
             </div>
           )}
         </CardContent>

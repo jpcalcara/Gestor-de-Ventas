@@ -17,8 +17,8 @@ export function Navigation() {
 
   const navItems = [
     { path: "/", label: "Productos", icon: Package, roles: ["admin", "vendedor"] },
-    { path: "/sales", label: "Ventas", icon: ShoppingCart, roles: ["admin", "vendedor"] },
-    { path: "/reports", label: "Reportes", icon: BarChart3, roles: ["admin"] },
+    { path: "/sales", label: "Vender", icon: ShoppingCart, roles: ["admin", "vendedor"] },
+    { path: "/reports", label: "Ventas", icon: BarChart3, roles: ["admin", "vendedor"] },
     { path: "/users", label: "Usuarios", icon: Users, roles: ["admin"] },
     { path: "/audit", label: "Auditoría", icon: ClipboardList, roles: ["admin"] },
   ];
