@@ -9,6 +9,8 @@ import ProductsPage from "@/pages/products";
 import ProductDetailPage from "@/pages/product-detail";
 import SalesPage from "@/pages/sales";
 import ReportsPage from "@/pages/reports";
+import UsersPage from "@/pages/users";
+import AuditPage from "@/pages/audit";
 import LoginPage from "@/pages/login";
 import NotFound from "@/pages/not-found";
 
@@ -25,6 +27,28 @@ function ProtectedRoute({ component: Component }: { component: React.ComponentTy
 
   if (!user) {
     return <Redirect to="/login" />;
+  }
+
+  return <Component />;
+}
+
+function AdminRoute({ component: Component }: { component: React.ComponentType }) {
+  const { user, isLoading, isAdmin } = useAuth();
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <div className="text-muted-foreground">Cargando...</div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Redirect to="/login" />;
+  }
+
+  if (!isAdmin) {
+    return <Redirect to="/" />;
   }
 
   return <Component />;
@@ -64,7 +88,13 @@ function Router() {
         <ProtectedRoute component={SalesPage} />
       </Route>
       <Route path="/reports">
-        <ProtectedRoute component={ReportsPage} />
+        <AdminRoute component={ReportsPage} />
+      </Route>
+      <Route path="/users">
+        <AdminRoute component={UsersPage} />
+      </Route>
+      <Route path="/audit">
+        <AdminRoute component={AuditPage} />
       </Route>
       <Route component={NotFound} />
     </Switch>

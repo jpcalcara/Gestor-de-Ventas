@@ -11,10 +11,12 @@ import { ProductForm } from "@/components/product-form";
 import { DeleteProductDialog } from "@/components/delete-product-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatPrice, formatNumber, isLowStock } from "@/lib/format";
+import { useAuth } from "@/lib/auth";
 import type { Product } from "@shared/schema";
 
 export default function ProductsPage() {
   const [, setLocation] = useLocation();
+  const { isAdmin } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -59,20 +61,22 @@ export default function ProductsPage() {
           <h1 className="text-2xl font-semibold" data-testid="text-page-title">Productos</h1>
           <p className="text-sm text-muted-foreground mt-1">Gestiona tu inventario de productos</p>
         </div>
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button data-testid="button-add-product">
-              <Plus className="h-4 w-4 mr-2" />
-              Agregar Producto
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Nuevo Producto</DialogTitle>
-            </DialogHeader>
-            <ProductForm onSuccess={handleAddSuccess} />
-          </DialogContent>
-        </Dialog>
+        {isAdmin && (
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogTrigger asChild>
+              <Button data-testid="button-add-product">
+                <Plus className="h-4 w-4 mr-2" />
+                Agregar Producto
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Nuevo Producto</DialogTitle>
+              </DialogHeader>
+              <ProductForm onSuccess={handleAddSuccess} />
+            </DialogContent>
+          </Dialog>
+        )}
       </div>
 
       <div className="w-full max-w-md">
@@ -120,7 +124,7 @@ export default function ProductsPage() {
                   : "Comienza agregando tu primer producto al inventario"}
               </p>
             </div>
-            {!searchQuery && (
+            {!searchQuery && isAdmin && (
               <Button onClick={() => setIsAddDialogOpen(true)} data-testid="button-add-first-product">
                 <Plus className="h-4 w-4 mr-2" />
                 Agregar Producto
@@ -188,25 +192,27 @@ export default function ProductsPage() {
                       </div>
                     </div>
 
-                    {/* Acciones */}
-                    <div className="flex items-center gap-2 flex-shrink-0">
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        onClick={() => handleEdit(product)}
-                        data-testid={`button-edit-${product.id}`}
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        onClick={() => handleDelete(product)}
-                        data-testid={`button-delete-${product.id}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
+                    {/* Acciones (solo admin) */}
+                    {isAdmin && (
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => handleEdit(product)}
+                          data-testid={`button-edit-${product.id}`}
+                        >
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          onClick={() => handleDelete(product)}
+                          data-testid={`button-delete-${product.id}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>

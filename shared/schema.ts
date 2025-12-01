@@ -1,8 +1,18 @@
 import { sql } from "drizzle-orm";
-import { pgTable, text, varchar, integer, decimal, timestamp, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, varchar, integer, decimal, timestamp, boolean, index, jsonb } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 import { relations } from "drizzle-orm";
+
+export const sessions = pgTable(
+  "sessions",
+  {
+    sid: varchar("sid").primaryKey(),
+    sess: jsonb("sess").notNull(),
+    expire: timestamp("expire").notNull(),
+  },
+  (table) => [index("IDX_session_expire").on(table.expire)],
+);
 
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
@@ -10,10 +20,13 @@ export const users = pgTable("users", {
   password: text("password"),
   firstName: text("first_name").notNull(),
   lastName: text("last_name").notNull(),
-  role: text("role").notNull().default("user"),
+  phone: text("phone"),
+  role: text("role").notNull().default("vendedor"),
   avatar: text("avatar").default("default"),
+  profileImageUrl: text("profile_image_url"),
   googleId: text("google_id").unique(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
 });
 
 export const products = pgTable("products", {
@@ -95,13 +108,16 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
 export const insertUserSchema = createInsertSchema(users).omit({
   id: true,
   createdAt: true,
+  updatedAt: true,
 }).extend({
   email: z.string().email("Email inválido"),
   firstName: z.string().min(1, "El nombre es requerido"),
   lastName: z.string().min(1, "El apellido es requerido"),
+  phone: z.string().optional(),
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres").optional(),
   googleId: z.string().optional(),
-  role: z.enum(["admin", "user"]).default("user"),
+  profileImageUrl: z.string().optional(),
+  role: z.enum(["admin", "vendedor"]).default("vendedor"),
 }).refine(
   (data) => data.password || data.googleId,
   {
@@ -109,6 +125,16 @@ export const insertUserSchema = createInsertSchema(users).omit({
     path: ["password"],
   }
 );
+
+export const upsertUserSchema = z.object({
+  id: z.string(),
+  email: z.string().email().nullable().optional(),
+  firstName: z.string().nullable().optional(),
+  lastName: z.string().nullable().optional(),
+  profileImageUrl: z.string().nullable().optional(),
+});
+
+export type UpsertUser = z.infer<typeof upsertUserSchema>;
 
 export const loginSchema = z.object({
   email: z.string().email("Email inválido").min(1, "El email es requerido"),

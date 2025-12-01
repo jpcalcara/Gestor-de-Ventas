@@ -9,7 +9,9 @@ interface AuthContextType {
   isLoading: boolean;
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  loginWithGoogle: () => void;
   isAdmin: boolean;
+  isVendedor: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -52,10 +54,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await logoutMutation.mutateAsync();
   };
 
+  const loginWithGoogle = () => {
+    window.location.href = "/api/login/google";
+  };
+
   const isAdmin = user?.role === "admin";
+  const isVendedor = user?.role === "vendedor";
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout, isAdmin }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout, loginWithGoogle, isAdmin, isVendedor }}>
       {children}
     </AuthContext.Provider>
   );

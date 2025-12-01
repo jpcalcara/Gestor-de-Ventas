@@ -21,20 +21,41 @@ export async function comparePassword(password: string, hash: string): Promise<b
   return await bcrypt.compare(password, hash);
 }
 
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (!req.session.userId) {
     return res.status(401).json({ message: "No autenticado" });
   }
+  
+  const user = await storage.getUser(req.session.userId);
+  if (!user) {
+    req.session.destroy(() => {});
+    return res.status(401).json({ message: "Sesión inválida" });
+  }
+  
+  req.session.userRole = user.role;
+  req.session.userName = `${user.firstName} ${user.lastName}`;
+  
   next();
 }
 
-export function requireAdmin(req: Request, res: Response, next: NextFunction) {
+export async function requireAdmin(req: Request, res: Response, next: NextFunction) {
   if (!req.session.userId) {
     return res.status(401).json({ message: "No autenticado" });
   }
-  if (req.session.userRole !== "admin") {
+  
+  const user = await storage.getUser(req.session.userId);
+  if (!user) {
+    req.session.destroy(() => {});
+    return res.status(401).json({ message: "Sesión inválida" });
+  }
+  
+  if (user.role !== "admin") {
     return res.status(403).json({ message: "Acceso denegado. Se requiere rol de administrador" });
   }
+  
+  req.session.userRole = user.role;
+  req.session.userName = `${user.firstName} ${user.lastName}`;
+  
   next();
 }
 

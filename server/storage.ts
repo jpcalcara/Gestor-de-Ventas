@@ -7,6 +7,7 @@ import {
   type SaleWithProduct,
   type User,
   type InsertUser,
+  type UpsertUser,
   type AuditLog,
   type InsertAuditLog,
   type PasswordResetToken,
@@ -19,7 +20,7 @@ import {
   updateSaleSchema,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, sql } from "drizzle-orm";
+import { eq, desc, sql, ne } from "drizzle-orm";
 
 export interface IStorage {
   getProducts(): Promise<Product[]>;
@@ -39,8 +40,11 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   getUserByGoogleId(googleId: string): Promise<User | undefined>;
+  getUsers(): Promise<User[]>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, updates: Partial<InsertUser>): Promise<User | undefined>;
+  upsertUser(userData: UpsertUser): Promise<User>;
+  deleteUser(id: string): Promise<boolean>;
   
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
   getAuditLogs(): Promise<AuditLog[]>;
@@ -270,10 +274,52 @@ export class DatabaseStorage implements IStorage {
   async updateUser(id: string, updates: Partial<InsertUser>): Promise<User | undefined> {
     const [updated] = await db
       .update(users)
-      .set(updates)
+      .set({ ...updates, updatedAt: new Date() })
       .where(eq(users.id, id))
       .returning();
     return updated || undefined;
+  }
+
+  async getUsers(): Promise<User[]> {
+    return await db.select().from(users).orderBy(desc(users.createdAt));
+  }
+
+  async upsertUser(userData: UpsertUser): Promise<User> {
+    const existingUser = await this.getUser(userData.id);
+    
+    if (existingUser) {
+      const [updated] = await db
+        .update(users)
+        .set({
+          email: userData.email || existingUser.email,
+          firstName: userData.firstName || existingUser.firstName,
+          lastName: userData.lastName || existingUser.lastName,
+          profileImageUrl: userData.profileImageUrl,
+          updatedAt: new Date(),
+        })
+        .where(eq(users.id, userData.id))
+        .returning();
+      return updated;
+    }
+
+    const [user] = await db
+      .insert(users)
+      .values({
+        id: userData.id,
+        email: userData.email || `user_${userData.id}@temp.local`,
+        firstName: userData.firstName || "Usuario",
+        lastName: userData.lastName || "Google",
+        profileImageUrl: userData.profileImageUrl,
+        role: "admin",
+        googleId: userData.id,
+      })
+      .returning();
+    return user;
+  }
+
+  async deleteUser(id: string): Promise<boolean> {
+    const result = await db.delete(users).where(eq(users.id, id));
+    return result.rowCount !== null && result.rowCount > 0;
   }
 
   async createAuditLog(insertLog: InsertAuditLog): Promise<AuditLog> {

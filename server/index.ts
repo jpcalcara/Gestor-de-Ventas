@@ -1,10 +1,12 @@
 import express, { type Request, Response, NextFunction } from "express";
 import session from "express-session";
 import ConnectPgSimple from "connect-pg-simple";
+import passport from "passport";
 import { pool } from "./db";
 import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { bootstrapAdmin } from "./bootstrap";
+import { setupAuth } from "./replitAuth";
 
 const app = express();
 
@@ -25,7 +27,7 @@ if (!process.env.SESSION_SECRET) {
 app.use(session({
   store: new PgSession({
     pool: pool as any,
-    tableName: "session",
+    tableName: "sessions",
     createTableIfMissing: true,
   }),
   secret: process.env.SESSION_SECRET,
@@ -38,6 +40,9 @@ app.use(session({
     sameSite: "lax",
   },
 }));
+
+app.use(passport.initialize());
+app.use(passport.session());
 
 app.use(express.json({
   limit: '10mb',
@@ -79,6 +84,7 @@ app.use((req, res, next) => {
 
 (async () => {
   await bootstrapAdmin();
+  await setupAuth(app);
   
   const server = await registerRoutes(app);
 

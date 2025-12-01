@@ -3,7 +3,30 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { insertProductSchema, insertSaleSchema, updateSaleSchema } from "@shared/schema";
 import { fromError } from "zod-validation-error";
-import { registerAuthRoutes, requireAuth, requireAdmin } from "./auth";
+import { registerAuthRoutes, requireAuth, requireAdmin, hashPassword } from "./auth";
+import { z } from "zod";
+
+async function createAuditLog(
+  userId: string,
+  userName: string,
+  actionType: string,
+  entity: string,
+  entityId?: string,
+  details?: string
+) {
+  try {
+    await storage.createAuditLog({
+      userId,
+      userName,
+      actionType,
+      entity,
+      entityId: entityId || null,
+      details: details || null,
+    });
+  } catch (error) {
+    console.error("Error creating audit log:", error);
+  }
+}
 
 export async function registerRoutes(app: Express): Promise<Server> {
   registerAuthRoutes(app);
@@ -38,6 +61,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const product = await storage.createProduct(result.data);
+      
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "crear",
+        "producto",
+        product.id,
+        `Producto creado: ${product.title}`
+      );
+      
       res.status(201).json(product);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -56,6 +89,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!product) {
         return res.status(404).json({ message: "Producto no encontrado" });
       }
+      
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "editar",
+        "producto",
+        product.id,
+        `Producto editado: ${product.title}`
+      );
+      
       res.json(product);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -64,10 +107,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/products/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
+      const productToDelete = await storage.getProduct(req.params.id);
       const deleted = await storage.deleteProduct(req.params.id);
       if (!deleted) {
         return res.status(404).json({ message: "Producto no encontrado" });
       }
+      
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "eliminar",
+        "producto",
+        req.params.id,
+        `Producto eliminado: ${productToDelete?.title || 'Desconocido'}`
+      );
+      
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -107,6 +161,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ...result.data,
         userId: req.session.userId!,
       });
+      
+      const product = await storage.getProduct(result.data.productId);
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "registrar_venta",
+        "venta",
+        sale.id,
+        `Venta registrada: ${result.data.quantity} unidades de ${product?.title || 'Producto'}`
+      );
+      
       res.status(201).json(sale);
     } catch (error: any) {
       res.status(400).json({ message: error.message });
@@ -134,6 +199,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!sale) {
         return res.status(404).json({ message: "Venta no encontrada" });
       }
+      
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "editar_venta",
+        "venta",
+        sale.id,
+        `Venta editada: cantidad cambiada a ${result.data.quantity}`
+      );
+      
       res.json(sale);
     } catch (error: any) {
       res.status(400).json({ message: error.message });
@@ -154,7 +229,162 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(500).json({ message: "Error al eliminar la venta" });
       }
       
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "eliminar_venta",
+        "venta",
+        req.params.id,
+        `Venta eliminada, stock restaurado: ${sale.quantity} unidades`
+      );
+      
       res.json({ success: true, message: "Venta eliminada y stock restaurado" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  const createUserSchema = z.object({
+    email: z.string().email("Email inválido"),
+    firstName: z.string().min(1, "El nombre es requerido"),
+    lastName: z.string().min(1, "El apellido es requerido"),
+    phone: z.string().optional(),
+    password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres"),
+    role: z.enum(["admin", "vendedor"]).default("vendedor"),
+  });
+
+  app.get("/api/users", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const users = await storage.getUsers();
+      const safeUsers = users.map(u => ({
+        id: u.id,
+        email: u.email,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        phone: u.phone,
+        role: u.role,
+        avatar: u.avatar,
+        profileImageUrl: u.profileImageUrl,
+        createdAt: u.createdAt,
+      }));
+      res.json(safeUsers);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/users", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const result = createUserSchema.safeParse(req.body);
+      if (!result.success) {
+        const validationError = fromError(result.error);
+        return res.status(400).json({ message: validationError.message });
+      }
+
+      const existing = await storage.getUserByEmail(result.data.email);
+      if (existing) {
+        return res.status(400).json({ message: "El email ya está registrado" });
+      }
+
+      const hashedPassword = await hashPassword(result.data.password);
+      const user = await storage.createUser({
+        ...result.data,
+        password: hashedPassword,
+      });
+
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "crear_usuario",
+        "usuario",
+        user.id,
+        `Usuario creado: ${user.firstName} ${user.lastName} (${user.role})`
+      );
+
+      res.status(201).json({
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        phone: user.phone,
+        role: user.role,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/users/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { firstName, lastName, phone, role, password } = req.body;
+      const updates: any = {};
+      
+      if (firstName) updates.firstName = firstName;
+      if (lastName) updates.lastName = lastName;
+      if (phone !== undefined) updates.phone = phone;
+      if (role && ["admin", "vendedor"].includes(role)) updates.role = role;
+      if (password && password.length >= 6) {
+        updates.password = await hashPassword(password);
+      }
+
+      const user = await storage.updateUser(req.params.id, updates);
+      if (!user) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "editar_usuario",
+        "usuario",
+        user.id,
+        `Usuario editado: ${user.firstName} ${user.lastName}`
+      );
+
+      res.json({
+        id: user.id,
+        email: user.email,
+        firstName: user.firstName,
+        lastName: user.lastName,
+        phone: user.phone,
+        role: user.role,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/users/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      if (req.params.id === req.session.userId) {
+        return res.status(400).json({ message: "No puedes eliminar tu propia cuenta" });
+      }
+
+      const userToDelete = await storage.getUser(req.params.id);
+      const deleted = await storage.deleteUser(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "eliminar_usuario",
+        "usuario",
+        req.params.id,
+        `Usuario eliminado: ${userToDelete?.firstName} ${userToDelete?.lastName}`
+      );
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/audit-logs", requireAdmin, async (_req: Request, res: Response) => {
+    try {
+      const logs = await storage.getAuditLogs();
+      res.json(logs);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

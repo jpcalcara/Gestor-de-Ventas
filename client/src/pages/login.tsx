@@ -7,13 +7,15 @@ import { useToast } from "@/hooks/use-toast";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { Package } from "lucide-react";
+import { SiGoogle } from "react-icons/si";
 import { loginSchema } from "@shared/schema";
 import { z } from "zod";
+import { Separator } from "@/components/ui/separator";
 
 type LoginFormData = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
-  const { login } = useAuth();
+  const { login, loginWithGoogle } = useAuth();
   const { toast } = useToast();
 
   const form = useForm<LoginFormData>({
@@ -28,7 +30,7 @@ export default function LoginPage() {
     try {
       await login(data.email, data.password);
       toast({
-        title: "¡Bienvenido!",
+        title: "Bienvenido",
         description: "Has iniciado sesión correctamente",
       });
     } catch (error: any) {
@@ -54,7 +56,29 @@ export default function LoginPage() {
             Ingresa tus credenciales para acceder al sistema
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-full"
+            onClick={loginWithGoogle}
+            data-testid="button-login-google"
+          >
+            <SiGoogle className="mr-2 h-4 w-4" />
+            Continuar con Google
+          </Button>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <Separator className="w-full" />
+            </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-card px-2 text-muted-foreground">
+                O continúa con email
+              </span>
+            </div>
+          </div>
+
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
               <FormField
@@ -85,7 +109,7 @@ export default function LoginPage() {
                     <FormControl>
                       <Input
                         type="password"
-                        placeholder="••••••••"
+                        placeholder="******"
                         autoComplete="current-password"
                         data-testid="input-password"
                         {...field}
@@ -105,7 +129,7 @@ export default function LoginPage() {
               </Button>
             </form>
           </Form>
-          <div className="mt-6 text-center text-sm text-muted-foreground">
+          <div className="mt-4 text-center text-sm text-muted-foreground">
             <p>Credenciales por defecto:</p>
             <p className="font-mono text-xs mt-1">
               admin@inventory.com / admin123
