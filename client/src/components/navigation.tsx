@@ -1,7 +1,11 @@
+import { useState, useRef } from "react";
 import { Link, useLocation } from "wouter";
-import { Package, ShoppingCart, BarChart3, Users, ClipboardList, LogOut, User } from "lucide-react";
+import { Package, ShoppingCart, BarChart3, Users, ClipboardList, LogOut, Camera, Settings } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -10,16 +14,63 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import type { CompanySettings } from "@shared/schema";
 
 export function Navigation() {
   const [location] = useLocation();
-  const { user, isAdmin, logout } = useAuth();
+  const { user, isAdmin, logout, refetchUser } = useAuth();
+  const { toast } = useToast();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { data: companySettings } = useQuery<CompanySettings>({
+    queryKey: ["/api/company-settings"],
+  });
+
+  const uploadProfileMutation = useMutation({
+    mutationFn: async (file: File) => {
+      const formData = new FormData();
+      formData.append("image", file);
+      const response = await fetch("/api/upload/profile", {
+        method: "POST",
+        body: formData,
+        credentials: "include",
+      });
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.message || "Error al subir la imagen");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Foto actualizada",
+        description: "Tu foto de perfil se ha actualizado correctamente",
+      });
+      refetchUser();
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (file) {
+      uploadProfileMutation.mutate(file);
+    }
+  };
 
   const navItems = [
     { path: "/", label: "Vender", icon: ShoppingCart, roles: ["admin", "vendedor"] },
     { path: "/stock", label: "Consultar Stock", icon: Package, roles: ["admin", "vendedor"] },
     { path: "/reports", label: "Ventas", icon: BarChart3, roles: ["admin", "vendedor"] },
     { path: "/users", label: "Usuarios", icon: Users, roles: ["admin"] },
+    { path: "/settings", label: "Configuración", icon: Settings, roles: ["admin"] },
     { path: "/audit", label: "Auditoría", icon: ClipboardList, roles: ["admin"] },
   ];
 
@@ -38,15 +89,26 @@ export function Navigation() {
         <div className="flex h-16 items-center justify-between gap-4">
           <div className="flex items-center gap-8">
             <Link href="/" className="flex items-center gap-2 text-xl font-semibold" data-testid="link-home">
-              <Package className="h-6 w-6 text-primary" />
-              <span>Inventario</span>
+              {companySettings?.logoUrl ? (
+                <img 
+                  src={companySettings.logoUrl} 
+                  alt={companySettings.companyName || "Logo"} 
+                  className="h-8 w-8 object-contain rounded"
+                  data-testid="img-nav-logo"
+                />
+              ) : (
+                <Package className="h-6 w-6 text-primary" />
+              )}
+              <span data-testid="text-nav-company-name">
+                {companySettings?.companyName || "JOTA Sistemas"}
+              </span>
             </Link>
             <nav className="hidden md:flex items-center gap-4">
               {visibleItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = location === item.path;
                 return (
-                  <Link key={item.path} href={item.path} data-testid={`link-nav-${item.label.toLowerCase()}`}>
+                  <Link key={item.path} href={item.path} data-testid={`link-nav-${item.label.toLowerCase().replace(/\s+/g, "-")}`}>
                     <Button
                       variant="ghost"
                       size="sm"
@@ -62,6 +124,14 @@ export function Navigation() {
           </div>
           
           <div className="flex items-center gap-2">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleFileChange}
+              accept="image/jpeg,image/png,image/gif,image/webp"
+              className="hidden"
+              data-testid="input-profile-image"
+            />
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="ghost" className="relative h-9 w-9 rounded-full" data-testid="button-user-menu">
@@ -82,6 +152,15 @@ export function Navigation() {
                   </div>
                 </div>
                 <DropdownMenuSeparator />
+                <DropdownMenuItem 
+                  onClick={() => fileInputRef.current?.click()}
+                  data-testid="button-change-photo"
+                  disabled={uploadProfileMutation.isPending}
+                >
+                  <Camera className="mr-2 h-4 w-4" />
+                  <span>{uploadProfileMutation.isPending ? "Subiendo..." : "Cambiar foto"}</span>
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={logout} data-testid="button-logout">
                   <LogOut className="mr-2 h-4 w-4" />
                   <span>Cerrar sesión</span>
@@ -101,7 +180,7 @@ export function Navigation() {
                 <Link 
                   key={item.path} 
                   href={item.path}
-                  data-testid={`link-nav-mobile-${item.label.toLowerCase()}`} 
+                  data-testid={`link-nav-mobile-${item.label.toLowerCase().replace(/\s+/g, "-")}`} 
                   className="flex-shrink-0"
                 >
                   <div

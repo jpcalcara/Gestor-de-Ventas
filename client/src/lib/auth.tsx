@@ -10,6 +10,7 @@ interface AuthContextType {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
   loginWithGoogle: () => void;
+  refetchUser: () => Promise<void>;
   isAdmin: boolean;
   isVendedor: boolean;
 }
@@ -19,11 +20,15 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [, setLocation] = useLocation();
 
-  const { data: user = null, isLoading } = useQuery<User | null>({
+  const { data: user = null, isLoading, refetch } = useQuery<User | null>({
     queryKey: ["/api/auth/me"],
     retry: false,
     refetchOnWindowFocus: false,
   });
+
+  const refetchUser = async () => {
+    await refetch();
+  };
 
   const loginMutation = useMutation({
     mutationFn: async ({ email, password }: { email: string; password: string }) => {
@@ -62,7 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isVendedor = user?.role === "vendedor";
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout, loginWithGoogle, isAdmin, isVendedor }}>
+    <AuthContext.Provider value={{ user, isLoading, login, logout, loginWithGoogle, refetchUser, isAdmin, isVendedor }}>
       {children}
     </AuthContext.Provider>
   );

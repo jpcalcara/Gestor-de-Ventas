@@ -499,7 +499,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.use("/uploads", require("express").static(uploadsDir));
+  app.use("/uploads", (await import("express")).default.static(uploadsDir));
 
   app.post("/api/upload/profile", requireAuth, upload.single("image"), async (req: Request, res: Response) => {
     try {

@@ -10,6 +10,7 @@ import ProductDetailPage from "@/pages/product-detail";
 import SalesPage from "@/pages/sales";
 import ReportsPage from "@/pages/reports";
 import UsersPage from "@/pages/users";
+import SettingsPage from "@/pages/settings";
 import AuditPage from "@/pages/audit";
 import LoginPage from "@/pages/login";
 import NotFound from "@/pages/not-found";
@@ -92,6 +93,9 @@ function Router() {
       </Route>
       <Route path="/users">
         <AdminRoute component={UsersPage} />
+      </Route>
+      <Route path="/settings">
+        <AdminRoute component={SettingsPage} />
       </Route>
       <Route path="/audit">
         <AdminRoute component={AuditPage} />

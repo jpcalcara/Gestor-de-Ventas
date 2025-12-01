@@ -11,12 +11,18 @@ import { SiGoogle } from "react-icons/si";
 import { loginSchema } from "@shared/schema";
 import { z } from "zod";
 import { Separator } from "@/components/ui/separator";
+import { useQuery } from "@tanstack/react-query";
+import type { CompanySettings } from "@shared/schema";
 
 type LoginFormData = z.infer<typeof loginSchema>;
 
 export default function LoginPage() {
   const { login, loginWithGoogle } = useAuth();
   const { toast } = useToast();
+
+  const { data: companySettings } = useQuery<CompanySettings>({
+    queryKey: ["/api/company-settings"],
+  });
 
   const form = useForm<LoginFormData>({
     resolver: zodResolver(loginSchema),
@@ -47,11 +53,22 @@ export default function LoginPage() {
       <Card className="w-full max-w-md">
         <CardHeader className="space-y-2 text-center">
           <div className="flex justify-center mb-2">
-            <div className="p-3 bg-primary/10 rounded-lg">
-              <Package className="h-8 w-8 text-primary" />
-            </div>
+            {companySettings?.logoUrl ? (
+              <img 
+                src={companySettings.logoUrl} 
+                alt={companySettings.companyName || "Logo"} 
+                className="h-16 w-16 object-contain rounded-lg"
+                data-testid="img-company-logo"
+              />
+            ) : (
+              <div className="p-3 bg-primary/10 rounded-lg">
+                <Package className="h-8 w-8 text-primary" />
+              </div>
+            )}
           </div>
-          <CardTitle className="text-2xl font-semibold">Inventario & Ventas</CardTitle>
+          <CardTitle className="text-2xl font-semibold" data-testid="text-company-name">
+            {companySettings?.companyName || "JOTA Sistemas"}
+          </CardTitle>
           <CardDescription>
             Ingresa tus credenciales para acceder al sistema
           </CardDescription>
