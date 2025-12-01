@@ -10,6 +10,8 @@ declare module "express-session" {
     userEmail: string;
     userName: string;
     userRole: string;
+    branchId: string;
+    branchName: string;
   }
 }
 

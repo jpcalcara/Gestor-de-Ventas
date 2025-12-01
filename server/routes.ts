@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertSaleSchema, updateSaleSchema, updateCompanySettingsSchema } from "@shared/schema";
+import { insertProductSchema, insertSaleSchema, updateSaleSchema, updateCompanySettingsSchema, insertBranchSchema, updateBranchSchema, insertBranchStockSchema } from "@shared/schema";
 import { fromError } from "zod-validation-error";
 import { registerAuthRoutes, requireAuth, requireAdmin, hashPassword } from "./auth";
 import { z } from "zod";
@@ -45,7 +45,8 @@ async function createAuditLog(
   actionType: string,
   entity: string,
   entityId?: string,
-  details?: string
+  details?: string,
+  branchId?: string
 ) {
   try {
     await storage.createAuditLog({
@@ -55,6 +56,7 @@ async function createAuditLog(
       entity,
       entityId: entityId || null,
       details: details || null,
+      branchId: branchId || null,
     });
   } catch (error) {
     console.error("Error creating audit log:", error);
@@ -548,6 +550,239 @@ export async function registerRoutes(app: Express): Promise<Server> {
       );
 
       res.json({ logoUrl, settings });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/branches", requireAuth, async (_req: Request, res: Response) => {
+    try {
+      const branchesList = await storage.getBranches();
+      res.json(branchesList);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/branches/:id", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const branch = await storage.getBranch(req.params.id);
+      if (!branch) {
+        return res.status(404).json({ message: "Sucursal no encontrada" });
+      }
+      res.json(branch);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/branches", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const result = insertBranchSchema.safeParse(req.body);
+      if (!result.success) {
+        const validationError = fromError(result.error);
+        return res.status(400).json({ message: validationError.message });
+      }
+
+      const branch = await storage.createBranch(result.data);
+      
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "crear_sucursal",
+        "sucursal",
+        branch.id,
+        `Sucursal creada: ${branch.name}`
+      );
+      
+      res.status(201).json(branch);
+    } catch (error: any) {
+      if (error.message?.includes("duplicate key")) {
+        return res.status(400).json({ message: "El número de sucursal ya existe" });
+      }
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/branches/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const result = updateBranchSchema.safeParse(req.body);
+      if (!result.success) {
+        const validationError = fromError(result.error);
+        return res.status(400).json({ message: validationError.message });
+      }
+
+      const branch = await storage.updateBranch(req.params.id, result.data);
+      if (!branch) {
+        return res.status(404).json({ message: "Sucursal no encontrada" });
+      }
+      
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "editar_sucursal",
+        "sucursal",
+        branch.id,
+        `Sucursal editada: ${branch.name}`
+      );
+
+      res.json(branch);
+    } catch (error: any) {
+      if (error.message?.includes("duplicate key")) {
+        return res.status(400).json({ message: "El número de sucursal ya existe" });
+      }
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/branches/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const branchToDelete = await storage.getBranch(req.params.id);
+      const deleted = await storage.deleteBranch(req.params.id);
+      if (!deleted) {
+        return res.status(404).json({ message: "Sucursal no encontrada" });
+      }
+      
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "eliminar_sucursal",
+        "sucursal",
+        req.params.id,
+        `Sucursal eliminada: ${branchToDelete?.name}`
+      );
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/session/branch", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const branchId = req.body.branchId;
+      if (!branchId) {
+        return res.status(400).json({ message: "Se requiere el ID de la sucursal" });
+      }
+
+      const branch = await storage.getBranch(branchId);
+      if (!branch) {
+        return res.status(404).json({ message: "Sucursal no encontrada" });
+      }
+
+      if (!branch.isActive) {
+        return res.status(400).json({ message: "La sucursal no está activa" });
+      }
+
+      req.session.branchId = branchId;
+      req.session.branchName = branch.name;
+
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "cambiar_sucursal",
+        "sucursal",
+        branchId,
+        `Cambió a sucursal: ${branch.name}`,
+        branchId
+      );
+
+      res.json({ branchId, branchName: branch.name });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/session/branch", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const branchId = req.session.branchId;
+      const branchName = req.session.branchName;
+      
+      if (!branchId) {
+        return res.json({ branchId: null, branchName: null });
+      }
+
+      res.json({ branchId, branchName });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/branches/:branchId/stocks", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const stocks = await storage.getBranchStocks(req.params.branchId);
+      res.json(stocks);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/branches/:branchId/stocks", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const result = insertBranchStockSchema.safeParse({
+        ...req.body,
+        branchId: req.params.branchId,
+      });
+      if (!result.success) {
+        const validationError = fromError(result.error);
+        return res.status(400).json({ message: validationError.message });
+      }
+
+      const stock = await storage.upsertBranchStock(result.data);
+      
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "actualizar_stock",
+        "stock_sucursal",
+        stock.id,
+        `Stock actualizado para producto en sucursal`,
+        req.params.branchId
+      );
+      
+      res.status(201).json(stock);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/branches/:branchId/sale-orders", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const orders = await storage.getSaleOrdersByBranch(req.params.branchId);
+      res.json(orders);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/branches/:branchId/sale-orders", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const order = await storage.createSaleOrderForBranch({
+        ...req.body,
+        userId: req.session.userId!,
+        branchId: req.params.branchId,
+      });
+      
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "crear_venta",
+        "orden_venta",
+        order.id,
+        `Venta creada por $${order.totalAmount}`,
+        req.params.branchId
+      );
+      
+      res.status(201).json(order);
+    } catch (error: any) {
+      res.status(400).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/branches/:branchId/audit-logs", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const logs = await storage.getAuditLogsByBranch(req.params.branchId);
+      res.json(logs);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
