@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/lib/auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { formatPrice, formatNumber } from "@/lib/format";
 import { 
@@ -16,6 +17,7 @@ import {
   type PaymentMethod,
   paymentMethodEnum,
   unitTypeEnum,
+  type BranchStock,
 } from "@shared/schema";
 
 const paymentMethodLabels: Record<PaymentMethod, { label: string; icon: typeof CreditCard }> = {
@@ -32,26 +34,57 @@ const unitTypeLabels: Record<string, string> = {
   litros: "Litros",
 };
 
+interface BranchStockWithProduct {
+  id: string;
+  branchId: string;
+  productId: string;
+  stock: string;
+  lowStockThreshold: number | null;
+  product: Product;
+}
+
 export default function SalesPage() {
   const { toast } = useToast();
+  const { branchId, branchName } = useAuth();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string>("");
   const [quantity, setQuantity] = useState<string>("1");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
   const [paidAmount, setPaidAmount] = useState<string>("");
 
-  const { data: products, isLoading } = useQuery<Product[]>({
+  const { data: products, isLoading: productsLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
   });
 
-  const selectedProduct = products?.find(p => p.id === selectedProductId);
+  const { data: branchStocks = [], isLoading: stocksLoading } = useQuery<BranchStockWithProduct[]>({
+    queryKey: ["/api/branches", branchId, "stocks"],
+    enabled: !!branchId,
+  });
+
+  const isLoading = productsLoading || stocksLoading;
+
+  const getProductStock = (productId: string): number => {
+    const branchStock = branchStocks.find(bs => bs.productId === productId);
+    return branchStock ? Number(branchStock.stock) : 0;
+  };
+
+  const productsWithStock = products?.map(p => ({
+    ...p,
+    stock: getProductStock(p.id).toString(),
+  })).filter(p => Number(p.stock) > 0) || [];
+
+  const selectedProduct = productsWithStock.find(p => p.id === selectedProductId);
 
   const createOrderMutation = useMutation({
     mutationFn: async (data: { paymentMethod: PaymentMethod; paidAmount?: number; items: CartItem[] }) => {
-      return await apiRequest("POST", "/api/sale-orders", data);
+      if (!branchId) {
+        throw new Error("Debe seleccionar una sucursal primero");
+      }
+      return await apiRequest("POST", `/api/branches/${branchId}/sale-orders`, data);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/branches", branchId, "stocks"] });
       queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
       queryClient.invalidateQueries({ queryKey: ["/api/sale-orders"] });
       queryClient.invalidateQueries({ queryKey: ["/api/audit-logs"] });
@@ -130,7 +163,7 @@ export default function SalesPage() {
 
   const updateCartQuantity = (index: number, newQuantity: number) => {
     const item = cart[index];
-    const product = products?.find(p => p.id === item.productId);
+    const product = productsWithStock.find(p => p.id === item.productId);
     
     if (!product) return;
     
@@ -203,7 +236,7 @@ export default function SalesPage() {
                     <SelectValue placeholder="Seleccionar producto" />
                   </SelectTrigger>
                   <SelectContent>
-                    {products?.filter(p => Number(p.stock) > 0).map((product) => (
+                    {productsWithStock.map((product) => (
                       <SelectItem key={product.id} value={product.id} data-testid={`option-product-${product.id}`}>
                         {product.title} ({formatNumber(Number(product.stock))} {unitTypeLabels[product.unitType]})
                       </SelectItem>

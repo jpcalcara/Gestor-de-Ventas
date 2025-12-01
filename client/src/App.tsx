@@ -5,11 +5,13 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { Navigation } from "@/components/navigation";
+import { BranchSelectorModal } from "@/components/branch-selector";
 import ProductsPage from "@/pages/products";
 import ProductDetailPage from "@/pages/product-detail";
 import SalesPage from "@/pages/sales";
 import ReportsPage from "@/pages/reports";
 import UsersPage from "@/pages/users";
+import BranchesPage from "@/pages/branches";
 import SettingsPage from "@/pages/settings";
 import AuditPage from "@/pages/audit";
 import LoginPage from "@/pages/login";
@@ -94,6 +96,9 @@ function Router() {
       <Route path="/users">
         <AdminRoute component={UsersPage} />
       </Route>
+      <Route path="/branches">
+        <AdminRoute component={BranchesPage} />
+      </Route>
       <Route path="/settings">
         <AdminRoute component={SettingsPage} />
       </Route>
@@ -111,6 +116,7 @@ function AppContent() {
   return (
     <div className="min-h-screen bg-background">
       {user && <Navigation />}
+      {user && <BranchSelectorModal />}
       <main>
         <Router />
       </main>

@@ -4,6 +4,11 @@ import { useLocation } from "wouter";
 import type { User } from "@shared/schema";
 import { apiRequest, queryClient } from "./queryClient";
 
+interface BranchSession {
+  branchId: string | null;
+  branchName: string | null;
+}
+
 interface AuthContextType {
   user: User | null;
   isLoading: boolean;
@@ -13,6 +18,11 @@ interface AuthContextType {
   refetchUser: () => Promise<void>;
   isAdmin: boolean;
   isVendedor: boolean;
+  branchId: string | null;
+  branchName: string | null;
+  isBranchLoading: boolean;
+  selectBranch: (branchId: string) => Promise<void>;
+  refetchBranch: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -26,8 +36,33 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     refetchOnWindowFocus: false,
   });
 
+  const { data: branchSession, isLoading: isBranchLoading, refetch: refetchBranchQuery } = useQuery<BranchSession>({
+    queryKey: ["/api/session/branch"],
+    enabled: !!user,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+
   const refetchUser = async () => {
     await refetch();
+  };
+
+  const refetchBranch = async () => {
+    await refetchBranchQuery();
+  };
+
+  const selectBranchMutation = useMutation({
+    mutationFn: async (branchId: string) => {
+      return await apiRequest("POST", "/api/session/branch", { branchId });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/session/branch"] });
+      await refetchBranchQuery();
+    },
+  });
+
+  const selectBranch = async (branchId: string) => {
+    await selectBranchMutation.mutateAsync(branchId);
   };
 
   const loginMutation = useMutation({
@@ -47,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/auth/me"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/session/branch"] });
       setLocation("/login");
     },
   });
@@ -67,7 +103,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const isVendedor = user?.role === "vendedor";
 
   return (
-    <AuthContext.Provider value={{ user, isLoading, login, logout, loginWithGoogle, refetchUser, isAdmin, isVendedor }}>
+    <AuthContext.Provider value={{ 
+      user, 
+      isLoading, 
+      login, 
+      logout, 
+      loginWithGoogle, 
+      refetchUser, 
+      isAdmin, 
+      isVendedor,
+      branchId: branchSession?.branchId || null,
+      branchName: branchSession?.branchName || null,
+      isBranchLoading,
+      selectBranch,
+      refetchBranch,
+    }}>
       {children}
     </AuthContext.Provider>
   );

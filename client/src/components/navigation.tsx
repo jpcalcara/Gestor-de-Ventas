@@ -1,6 +1,6 @@
-import { useState, useRef } from "react";
+import { useRef } from "react";
 import { Link, useLocation } from "wouter";
-import { Package, ShoppingCart, BarChart3, Users, ClipboardList, LogOut, Camera, Settings } from "lucide-react";
+import { Package, ShoppingCart, BarChart3, Users, ClipboardList, LogOut, Camera, Settings, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { BranchSwitcher } from "@/components/branch-selector";
 import type { CompanySettings } from "@shared/schema";
 
 export function Navigation() {
@@ -70,6 +71,7 @@ export function Navigation() {
     { path: "/stock", label: "Consultar Stock", icon: Package, roles: ["admin", "vendedor"] },
     { path: "/reports", label: "Ventas", icon: BarChart3, roles: ["admin", "vendedor"] },
     { path: "/users", label: "Usuarios", icon: Users, roles: ["admin"] },
+    { path: "/branches", label: "Sucursales", icon: Building2, roles: ["admin"] },
     { path: "/settings", label: "Configuración", icon: Settings, roles: ["admin"] },
     { path: "/audit", label: "Auditoría", icon: ClipboardList, roles: ["admin"] },
   ];
@@ -124,6 +126,7 @@ export function Navigation() {
           </div>
           
           <div className="flex items-center gap-2">
+            <BranchSwitcher />
             <input
               type="file"
               ref={fileInputRef}

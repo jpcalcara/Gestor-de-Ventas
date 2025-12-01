@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { formatPrice, formatNumber } from "@/lib/format";
+import { useAuth } from "@/lib/auth";
 import type { SaleOrderWithItems, Product } from "@shared/schema";
 import { format, parseISO, startOfDay } from "date-fns";
 import { es } from "date-fns/locale";
