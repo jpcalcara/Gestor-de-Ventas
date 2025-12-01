@@ -51,16 +51,27 @@ function updateUserSession(
 }
 
 async function upsertUser(claims: any) {
-  const existingUser = await storage.getUser(claims["sub"]);
+  const existingUserById = await storage.getUser(claims["sub"]);
   
-  if (existingUser) {
+  if (existingUserById) {
     await storage.updateUser(claims["sub"], {
-      email: claims["email"] || existingUser.email,
-      firstName: claims["first_name"] || existingUser.firstName,
-      lastName: claims["last_name"] || existingUser.lastName,
+      firstName: claims["first_name"] || existingUserById.firstName,
+      lastName: claims["last_name"] || existingUserById.lastName,
       profileImageUrl: claims["profile_image_url"],
     });
-    return existingUser;
+    return existingUserById;
+  }
+  
+  const existingUserByEmail = claims["email"] ? await storage.getUserByEmail(claims["email"]) : null;
+  
+  if (existingUserByEmail) {
+    if (!existingUserByEmail.googleId) {
+      await storage.updateUser(existingUserByEmail.id, {
+        googleId: claims["sub"],
+        profileImageUrl: claims["profile_image_url"],
+      });
+    }
+    return existingUserByEmail;
   }
   
   return await storage.upsertUser({
@@ -69,6 +80,7 @@ async function upsertUser(claims: any) {
     firstName: claims["first_name"],
     lastName: claims["last_name"],
     profileImageUrl: claims["profile_image_url"],
+    role: "vendedor",
   });
 }
 
