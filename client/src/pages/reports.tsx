@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Calendar, DollarSign, Package, User, CreditCard, Banknote, Smartphone, ArrowRightLeft, ShoppingCart } from "lucide-react";
+import { Calendar, DollarSign, Package, User, CreditCard, Banknote, Smartphone, ArrowRightLeft, ShoppingCart, ChevronDown } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,9 +8,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { formatPrice, formatNumber } from "@/lib/format";
 import type { SaleOrderWithItems, Product } from "@shared/schema";
-import { format, isToday, parseISO, startOfDay, endOfDay } from "date-fns";
+import { format, parseISO, startOfDay } from "date-fns";
 import { es } from "date-fns/locale";
 
 const paymentMethodLabels: Record<string, string> = {
@@ -185,9 +186,9 @@ export default function ReportsPage() {
         </CardHeader>
         <CardContent>
           {ordersLoading ? (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {[1, 2, 3].map((i) => (
-                <Skeleton key={i} className="h-24 w-full" />
+                <Skeleton key={i} className="h-16 w-full" />
               ))}
             </div>
           ) : filteredOrders.length === 0 ? (
@@ -203,60 +204,74 @@ export default function ReportsPage() {
               </p>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-2">
               {filteredOrders.map((order) => (
-                <Card key={order.id} className="overflow-hidden" data-testid={`card-sale-order-${order.id}`}>
-                  <div className="p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-4 mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex items-center gap-2 text-muted-foreground">
-                          <User className="h-4 w-4" />
-                          <span className="font-medium text-foreground" data-testid={`text-vendor-name-${order.id}`}>
-                            {order.user?.firstName} {order.user?.lastName}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <Badge variant="secondary" className="flex items-center gap-1" data-testid={`badge-payment-${order.id}`}>
-                          <PaymentIcon method={order.paymentMethod} />
-                          {paymentMethodLabels[order.paymentMethod] || order.paymentMethod}
-                        </Badge>
-                        <span className="text-sm text-muted-foreground" data-testid={`text-sale-time-${order.id}`}>
-                          {format(new Date(order.createdAt), "HH:mm")}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="space-y-2 mb-3">
-                      {order.items.map((item, index) => (
-                        <div 
-                          key={item.id} 
-                          className="flex items-center justify-between text-sm py-1"
-                          data-testid={`item-${order.id}-${index}`}
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="text-muted-foreground">
-                              {formatNumber(Number(item.quantity))} {item.unitType === "unidad" ? "u" : item.unitType}
+                <Collapsible key={order.id}>
+                  <div className="border rounded-lg" data-testid={`card-sale-order-${order.id}`}>
+                    <CollapsibleTrigger asChild>
+                      <button 
+                        className="w-full p-4 flex items-center justify-between gap-4 hover-elevate rounded-lg text-left"
+                        data-testid={`button-expand-${order.id}`}
+                      >
+                        <div className="flex items-center gap-4 flex-wrap min-w-0">
+                          <div className="flex items-center gap-2 text-muted-foreground shrink-0">
+                            <User className="h-4 w-4" />
+                            <span className="font-medium text-foreground" data-testid={`text-vendor-name-${order.id}`}>
+                              {order.user?.firstName} {order.user?.lastName}
                             </span>
-                            <span>{item.product.title}</span>
                           </div>
-                          <span className="font-mono text-muted-foreground">
-                            {formatPrice(item.totalPrice)}
+                          <Badge variant="secondary" className="flex items-center gap-1 shrink-0" data-testid={`badge-payment-${order.id}`}>
+                            <PaymentIcon method={order.paymentMethod} />
+                            {paymentMethodLabels[order.paymentMethod] || order.paymentMethod}
+                          </Badge>
+                          <span className="text-sm text-muted-foreground shrink-0" data-testid={`text-sale-datetime-${order.id}`}>
+                            {format(new Date(order.createdAt), "dd/MM/yyyy HH:mm")}
                           </span>
                         </div>
-                      ))}
-                    </div>
-
-                    <div className="flex items-center justify-between pt-3 border-t">
-                      <span className="text-sm text-muted-foreground">
-                        {order.items.length} {order.items.length === 1 ? "producto" : "productos"}
-                      </span>
-                      <span className="text-lg font-semibold font-mono" data-testid={`text-order-total-${order.id}`}>
-                        {formatPrice(order.totalAmount)}
-                      </span>
-                    </div>
+                        <div className="flex items-center gap-3 shrink-0">
+                          <span className="text-lg font-semibold font-mono" data-testid={`text-order-total-${order.id}`}>
+                            {formatPrice(order.totalAmount)}
+                          </span>
+                          <ChevronDown className="h-5 w-5 text-muted-foreground transition-transform duration-200 [[data-state=open]_&]:rotate-180" />
+                        </div>
+                      </button>
+                    </CollapsibleTrigger>
+                    <CollapsibleContent>
+                      <div className="px-4 pb-4 pt-0 border-t">
+                        <div className="pt-3 space-y-2">
+                          {order.items.map((item, index) => (
+                            <div 
+                              key={item.id} 
+                              className="flex items-center justify-between text-sm py-1"
+                              data-testid={`item-${order.id}-${index}`}
+                            >
+                              <div className="flex items-center gap-2">
+                                <span className="text-muted-foreground">
+                                  {formatNumber(Number(item.quantity))} {item.unitType === "unidad" ? "u" : item.unitType}
+                                </span>
+                                <span>{item.product.title}</span>
+                              </div>
+                              <span className="font-mono text-muted-foreground">
+                                {formatPrice(item.totalPrice)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="flex items-center justify-between pt-3 mt-2 border-t text-sm text-muted-foreground">
+                          <span>{order.items.length} {order.items.length === 1 ? "producto" : "productos"}</span>
+                          {order.paymentMethod === "efectivo" && order.paidAmount && (
+                            <div className="flex gap-4">
+                              <span>Pagó: {formatPrice(order.paidAmount)}</span>
+                              {order.changeAmount && Number(order.changeAmount) > 0 && (
+                                <span>Vuelto: {formatPrice(order.changeAmount)}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </CollapsibleContent>
                   </div>
-                </Card>
+                </Collapsible>
               ))}
             </div>
           )}
