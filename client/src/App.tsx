@@ -79,16 +79,16 @@ function Router() {
         <RedirectIfAuthenticated component={LoginPage} />
       </Route>
       <Route path="/">
+        <ProtectedRoute component={SalesPage} />
+      </Route>
+      <Route path="/stock">
         <ProtectedRoute component={ProductsPage} />
       </Route>
       <Route path="/products/:id">
         <ProtectedRoute component={ProductDetailPage} />
       </Route>
-      <Route path="/sales">
-        <ProtectedRoute component={SalesPage} />
-      </Route>
       <Route path="/reports">
-        <AdminRoute component={ReportsPage} />
+        <ProtectedRoute component={ReportsPage} />
       </Route>
       <Route path="/users">
         <AdminRoute component={UsersPage} />
