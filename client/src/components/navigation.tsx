@@ -37,28 +37,24 @@ export function Navigation() {
       <div className="container mx-auto px-4 md:px-8">
         <div className="flex h-16 items-center justify-between gap-4">
           <div className="flex items-center gap-8">
-            <Link href="/">
-              <a className="flex items-center gap-2 text-xl font-semibold" data-testid="link-home">
-                <Package className="h-6 w-6 text-primary" />
-                <span>Inventario</span>
-              </a>
+            <Link href="/" className="flex items-center gap-2 text-xl font-semibold" data-testid="link-home">
+              <Package className="h-6 w-6 text-primary" />
+              <span>Inventario</span>
             </Link>
             <nav className="hidden md:flex items-center gap-4">
               {visibleItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = location === item.path;
                 return (
-                  <Link key={item.path} href={item.path}>
-                    <a data-testid={`link-nav-${item.label.toLowerCase()}`}>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className={isActive ? "bg-accent" : ""}
-                      >
-                        <Icon className="h-4 w-4 mr-2" />
-                        {item.label}
-                      </Button>
-                    </a>
+                  <Link key={item.path} href={item.path} data-testid={`link-nav-${item.label.toLowerCase()}`}>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className={isActive ? "bg-accent" : ""}
+                    >
+                      <Icon className="h-4 w-4 mr-2" />
+                      {item.label}
+                    </Button>
                   </Link>
                 );
               })}
@@ -102,15 +98,18 @@ export function Navigation() {
               const Icon = item.icon;
               const isActive = location === item.path;
               return (
-                <Link key={item.path} href={item.path}>
-                  <a data-testid={`link-nav-mobile-${item.label.toLowerCase()}`} className="flex-shrink-0">
-                    <div
-                      className={`flex flex-col items-center gap-1 py-2 px-2 rounded-md hover-elevate ${isActive ? "bg-accent" : ""}`}
-                    >
-                      <Icon className="h-5 w-5" />
-                      <span className="text-xs">{item.label}</span>
-                    </div>
-                  </a>
+                <Link 
+                  key={item.path} 
+                  href={item.path}
+                  data-testid={`link-nav-mobile-${item.label.toLowerCase()}`} 
+                  className="flex-shrink-0"
+                >
+                  <div
+                    className={`flex flex-col items-center gap-1 py-2 px-2 rounded-md hover-elevate ${isActive ? "bg-accent" : ""}`}
+                  >
+                    <Icon className="h-5 w-5" />
+                    <span className="text-xs">{item.label}</span>
+                  </div>
                 </Link>
               );
             })}

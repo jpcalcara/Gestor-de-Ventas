@@ -5,6 +5,9 @@ import {
   type InsertSale,
   type UpdateSale,
   type SaleWithProduct,
+  type SaleOrder,
+  type InsertSaleOrder,
+  type SaleOrderWithItems,
   type User,
   type InsertUser,
   type UpsertUser,
@@ -14,13 +17,14 @@ import {
   type InsertPasswordResetToken,
   products,
   sales,
+  saleOrders,
   users,
   auditLogs,
   passwordResetTokens,
   updateSaleSchema,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, sql, ne } from "drizzle-orm";
+import { eq, desc, sql } from "drizzle-orm";
 
 export interface IStorage {
   getProducts(): Promise<Product[]>;
@@ -34,6 +38,9 @@ export interface IStorage {
   createSale(sale: InsertSale & { userId: string }): Promise<Sale>;
   updateSale(id: string, updates: UpdateSale): Promise<Sale | undefined>;
   deleteSale(id: string): Promise<boolean>;
+  
+  getSaleOrders(): Promise<SaleOrderWithItems[]>;
+  createSaleOrder(order: InsertSaleOrder & { userId: string }): Promise<SaleOrder>;
   
   updateProductStock(productId: string, quantity: number): Promise<Product | undefined>;
   
@@ -123,8 +130,9 @@ export class DatabaseStorage implements IStorage {
         throw new Error("Producto no encontrado");
       }
 
+      const quantity = Number(insertSale.quantity);
       const unitPriceCents = Math.round(parseFloat(product.price) * 100);
-      const totalPriceCents = unitPriceCents * insertSale.quantity;
+      const totalPriceCents = Math.round(unitPriceCents * quantity);
       const unitPrice = (unitPriceCents / 100).toFixed(2);
       const totalPrice = (totalPriceCents / 100).toFixed(2);
 
@@ -133,7 +141,8 @@ export class DatabaseStorage implements IStorage {
         .values({
           productId: insertSale.productId,
           userId: insertSale.userId,
-          quantity: insertSale.quantity,
+          quantity: String(quantity),
+          unitType: insertSale.unitType || product.unitType,
           unitPrice,
           totalPrice,
         })
@@ -141,15 +150,109 @@ export class DatabaseStorage implements IStorage {
 
       const [updatedProduct] = await tx
         .update(products)
-        .set({ stock: sql`stock - ${insertSale.quantity}` })
+        .set({ stock: sql`stock - ${quantity}` })
         .where(eq(products.id, insertSale.productId))
         .returning();
 
-      if (!updatedProduct || updatedProduct.stock < 0) {
+      if (!updatedProduct || Number(updatedProduct.stock) < 0) {
         throw new Error(`Stock insuficiente. Disponible: ${product.stock}`);
       }
 
       return sale;
+    });
+  }
+
+  async getSaleOrders(): Promise<SaleOrderWithItems[]> {
+    const orders = await db
+      .select()
+      .from(saleOrders)
+      .leftJoin(users, eq(saleOrders.userId, users.id))
+      .orderBy(desc(saleOrders.createdAt));
+
+    const result: SaleOrderWithItems[] = [];
+    
+    for (const row of orders) {
+      const orderSales = await db
+        .select()
+        .from(sales)
+        .leftJoin(products, eq(sales.productId, products.id))
+        .where(eq(sales.orderId, row.sale_orders.id));
+
+      result.push({
+        ...row.sale_orders,
+        user: row.users || undefined,
+        items: orderSales
+          .filter(s => s.products !== null)
+          .map(s => ({
+            ...s.sales,
+            product: s.products!,
+          })),
+      });
+    }
+
+    return result;
+  }
+
+  async createSaleOrder(order: InsertSaleOrder & { userId: string }): Promise<SaleOrder> {
+    return await db.transaction(async (tx) => {
+      let totalAmount = 0;
+      
+      for (const item of order.items) {
+        const [product] = await tx
+          .select()
+          .from(products)
+          .where(eq(products.id, item.productId));
+
+        if (!product) {
+          throw new Error(`Producto no encontrado: ${item.productTitle}`);
+        }
+
+        const quantity = Number(item.quantity);
+        if (Number(product.stock) < quantity) {
+          throw new Error(`Stock insuficiente para ${product.title}. Disponible: ${product.stock}`);
+        }
+
+        totalAmount += item.unitPrice * quantity;
+      }
+
+      const changeAmount = order.paymentMethod === "efectivo" && order.paidAmount 
+        ? order.paidAmount - totalAmount 
+        : null;
+
+      const [saleOrder] = await tx
+        .insert(saleOrders)
+        .values({
+          userId: order.userId,
+          paymentMethod: order.paymentMethod,
+          paidAmount: order.paidAmount?.toString() || null,
+          changeAmount: changeAmount?.toFixed(2) || null,
+          totalAmount: totalAmount.toFixed(2),
+        })
+        .returning();
+
+      for (const item of order.items) {
+        const quantity = Number(item.quantity);
+        const totalPrice = (item.unitPrice * quantity).toFixed(2);
+
+        await tx
+          .insert(sales)
+          .values({
+            orderId: saleOrder.id,
+            productId: item.productId,
+            userId: order.userId,
+            quantity: String(quantity),
+            unitType: item.unitType,
+            unitPrice: item.unitPrice.toFixed(2),
+            totalPrice,
+          });
+
+        await tx
+          .update(products)
+          .set({ stock: sql`stock - ${quantity}` })
+          .where(eq(products.id, item.productId));
+      }
+
+      return saleOrder;
     });
   }
 
@@ -165,8 +268,8 @@ export class DatabaseStorage implements IStorage {
 
       if (!currentSale) return undefined;
 
-      const originalQty = currentSale.quantity;
-      const nextQty = updates.quantity;
+      const originalQty = Number(currentSale.quantity);
+      const nextQty = Number(updates.quantity);
 
       if (nextQty === originalQty) {
         const [updated] = await tx
@@ -189,13 +292,14 @@ export class DatabaseStorage implements IStorage {
       if (!product) throw new Error("Producto no encontrado");
 
       const delta = originalQty - nextQty;
+      const currentStock = Number(product.stock);
       
-      if (product.stock + delta < 0) {
-        throw new Error(`Stock insuficiente. Disponible: ${product.stock + originalQty}`);
+      if (currentStock + delta < 0) {
+        throw new Error(`Stock insuficiente. Disponible: ${currentStock + originalQty}`);
       }
 
       const unitPriceCents = Math.round(parseFloat(currentSale.unitPrice) * 100);
-      const totalPriceCents = unitPriceCents * nextQty;
+      const totalPriceCents = Math.round(unitPriceCents * nextQty);
       const totalPrice = (totalPriceCents / 100).toFixed(2);
 
       const [updatedProduct] = await tx
@@ -211,7 +315,7 @@ export class DatabaseStorage implements IStorage {
       const [updated] = await tx
         .update(sales)
         .set({
-          quantity: nextQty,
+          quantity: String(nextQty),
           totalPrice,
           isEdited: true,
           updatedAt: new Date(),

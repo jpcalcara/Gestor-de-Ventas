@@ -7,9 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
-import { insertProductSchema, type InsertProduct, type Product } from "@shared/schema";
+import { insertProductSchema, type InsertProduct, type Product, unitTypeEnum } from "@shared/schema";
+
+const unitTypeLabels: Record<string, string> = {
+  unidad: "Unidad (enteros)",
+  gramos: "Gramos (peso)",
+  litros: "Litros (volumen)",
+};
 
 interface ProductFormProps {
   product?: Product;
@@ -26,7 +33,8 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
       title: product?.title || "",
       description: product?.description || "",
       price: product ? Number(product.price) : 0,
-      stock: product?.stock || 0,
+      stock: product ? Number(product.stock) : 0,
+      unitType: (product?.unitType as typeof unitTypeEnum[number]) || "unidad",
       imageUrl: product?.imageUrl || "",
     },
   });
@@ -138,13 +146,38 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
           )}
         />
 
+        <FormField
+          control={form.control}
+          name="unitType"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Tipo de Unidad</FormLabel>
+              <Select onValueChange={field.onChange} value={field.value}>
+                <FormControl>
+                  <SelectTrigger data-testid="select-product-unit-type">
+                    <SelectValue placeholder="Seleccionar tipo de unidad" />
+                  </SelectTrigger>
+                </FormControl>
+                <SelectContent>
+                  {unitTypeEnum.map((type) => (
+                    <SelectItem key={type} value={type} data-testid={`option-unit-type-${type}`}>
+                      {unitTypeLabels[type]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
         <div className="grid grid-cols-2 gap-4">
           <FormField
             control={form.control}
             name="price"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Precio Unitario</FormLabel>
+                <FormLabel>Precio por {unitTypeLabels[form.watch("unitType") || "unidad"].split(" ")[0]}</FormLabel>
                 <FormControl>
                   <Input
                     type="number"
@@ -165,11 +198,12 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
             name="stock"
             render={({ field }) => (
               <FormItem>
-                <FormLabel>Stock</FormLabel>
+                <FormLabel>Stock ({unitTypeLabels[form.watch("unitType") || "unidad"].split(" ")[0]})</FormLabel>
                 <FormControl>
                   <Input
                     type="number"
                     min="0"
+                    step={form.watch("unitType") === "unidad" ? "1" : "0.1"}
                     placeholder="0"
                     {...field}
                     data-testid="input-product-stock"

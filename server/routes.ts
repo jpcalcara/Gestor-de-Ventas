@@ -222,7 +222,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Venta no encontrada" });
       }
 
-      await storage.updateProductStock(sale.productId, sale.quantity);
+      await storage.updateProductStock(sale.productId, Number(sale.quantity));
       
       const deleted = await storage.deleteSale(req.params.id);
       if (!deleted) {
@@ -241,6 +241,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json({ success: true, message: "Venta eliminada y stock restaurado" });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/sale-orders", requireAuth, async (_req: Request, res: Response) => {
+    try {
+      const orders = await storage.getSaleOrders();
+      res.json(orders);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/sale-orders", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const { insertSaleOrderSchema } = await import("@shared/schema");
+      const result = insertSaleOrderSchema.safeParse(req.body);
+      if (!result.success) {
+        const validationError = fromError(result.error);
+        return res.status(400).json({ message: validationError.message });
+      }
+
+      const order = await storage.createSaleOrder({
+        ...result.data,
+        userId: req.session.userId!,
+      });
+
+      const itemsDescription = result.data.items
+        .map(i => `${i.quantity} ${i.unitType} de ${i.productTitle}`)
+        .join(", ");
+      
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "registrar_venta",
+        "orden_venta",
+        order.id,
+        `Orden de venta registrada: ${itemsDescription}. Método: ${result.data.paymentMethod}. Total: ${order.totalAmount}`
+      );
+      
+      res.status(201).json(order);
+    } catch (error: any) {
+      res.status(400).json({ message: error.message });
     }
   });
 
