@@ -48,7 +48,7 @@ export default function ReportsPage() {
     return saleOrders.filter(order => {
       const orderDate = new Date(order.createdAt);
       
-      if (selectedDate) {
+      if (selectedDate && selectedDate.trim() !== "") {
         const filterDate = parseISO(selectedDate);
         const orderStart = startOfDay(orderDate);
         const filterStart = startOfDay(filterDate);
@@ -74,7 +74,8 @@ export default function ReportsPage() {
     setSelectedProductId("all");
   };
 
-  const hasActiveFilters = selectedDate !== today || selectedProductId !== "all";
+  const hasActiveFilters = (selectedDate && selectedDate !== today) || selectedProductId !== "all";
+  const isShowingAllDates = !selectedDate || selectedDate.trim() === "";
 
   const PaymentIcon = ({ method }: { method: string }) => {
     const Icon = paymentMethodIcons[method] || CreditCard;
@@ -175,7 +176,11 @@ export default function ReportsPage() {
       <Card>
         <CardHeader>
           <CardTitle>
-            {selectedDate === today ? "Ventas de Hoy" : `Ventas del ${format(parseISO(selectedDate), "d 'de' MMMM", { locale: es })}`}
+            {isShowingAllDates 
+              ? "Todas las Ventas" 
+              : selectedDate === today 
+                ? "Ventas de Hoy" 
+                : `Ventas del ${format(parseISO(selectedDate), "d 'de' MMMM", { locale: es })}`}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -189,10 +194,10 @@ export default function ReportsPage() {
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-base font-medium" data-testid="text-no-sales">
-                {hasActiveFilters ? "No se encontraron ventas" : "No hay ventas hoy"}
+                {hasActiveFilters || isShowingAllDates ? "No se encontraron ventas" : "No hay ventas hoy"}
               </h3>
               <p className="text-sm text-muted-foreground mt-1 max-w-sm">
-                {hasActiveFilters
+                {hasActiveFilters || isShowingAllDates
                   ? "Intenta ajustar los filtros de búsqueda"
                   : "Las ventas aparecerán aquí cuando se registren"}
               </p>
