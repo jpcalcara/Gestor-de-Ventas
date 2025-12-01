@@ -1,10 +1,43 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertSaleSchema, updateSaleSchema } from "@shared/schema";
+import { insertProductSchema, insertSaleSchema, updateSaleSchema, updateCompanySettingsSchema } from "@shared/schema";
 import { fromError } from "zod-validation-error";
 import { registerAuthRoutes, requireAuth, requireAdmin, hashPassword } from "./auth";
 import { z } from "zod";
+import multer from "multer";
+import path from "path";
+import fs from "fs";
+
+const uploadsDir = path.join(process.cwd(), "uploads");
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
+
+const uploadStorage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, uploadsDir);
+  },
+  filename: (_req, file, cb) => {
+    const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1E9);
+    cb(null, uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const upload = multer({
+  storage: uploadStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowedTypes = /jpeg|jpg|png|gif|webp/;
+    const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = allowedTypes.test(file.mimetype);
+    if (extname && mimetype) {
+      cb(null, true);
+    } else {
+      cb(new Error("Solo se permiten imágenes (jpeg, jpg, png, gif, webp)"));
+    }
+  }
+});
 
 async function createAuditLog(
   userId: string,
@@ -427,6 +460,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const logs = await storage.getAuditLogs();
       res.json(logs);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/company-settings", async (_req: Request, res: Response) => {
+    try {
+      const settings = await storage.getCompanySettings();
+      res.json(settings);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/company-settings", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const result = updateCompanySettingsSchema.safeParse(req.body);
+      if (!result.success) {
+        const validationError = fromError(result.error);
+        return res.status(400).json({ message: validationError.message });
+      }
+
+      const settings = await storage.updateCompanySettings(result.data);
+      
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "editar_configuracion",
+        "configuracion",
+        settings.id,
+        `Configuración de empresa actualizada`
+      );
+
+      res.json(settings);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.use("/uploads", require("express").static(uploadsDir));
+
+  app.post("/api/upload/profile", requireAuth, upload.single("image"), async (req: Request, res: Response) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No se proporcionó ninguna imagen" });
+      }
+
+      const imageUrl = `/uploads/${req.file.filename}`;
+      const user = await storage.updateUser(req.session.userId!, { profileImageUrl: imageUrl });
+      
+      if (!user) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "actualizar_perfil",
+        "usuario",
+        user.id,
+        "Foto de perfil actualizada"
+      );
+
+      res.json({ imageUrl, user });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/upload/logo", requireAdmin, upload.single("image"), async (req: Request, res: Response) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: "No se proporcionó ninguna imagen" });
+      }
+
+      const logoUrl = `/uploads/${req.file.filename}`;
+      const settings = await storage.updateCompanySettings({ logoUrl });
+      
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "actualizar_logo",
+        "configuracion",
+        settings.id,
+        "Logo de empresa actualizado"
+      );
+
+      res.json({ logoUrl, settings });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

@@ -15,12 +15,15 @@ import {
   type InsertAuditLog,
   type PasswordResetToken,
   type InsertPasswordResetToken,
+  type CompanySettings,
+  type UpdateCompanySettings,
   products,
   sales,
   saleOrders,
   users,
   auditLogs,
   passwordResetTokens,
+  companySettings,
   updateSaleSchema,
 } from "@shared/schema";
 import { db } from "./db";
@@ -59,6 +62,9 @@ export interface IStorage {
   createPasswordResetToken(token: InsertPasswordResetToken): Promise<PasswordResetToken>;
   getPasswordResetToken(token: string): Promise<PasswordResetToken | undefined>;
   markPasswordResetTokenUsed(id: string): Promise<void>;
+  
+  getCompanySettings(): Promise<CompanySettings>;
+  updateCompanySettings(updates: UpdateCompanySettings): Promise<CompanySettings>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -459,6 +465,27 @@ export class DatabaseStorage implements IStorage {
       .update(passwordResetTokens)
       .set({ usedAt: new Date() })
       .where(eq(passwordResetTokens.id, id));
+  }
+
+  async getCompanySettings(): Promise<CompanySettings> {
+    const [settings] = await db.select().from(companySettings);
+    if (settings) return settings;
+    
+    const [newSettings] = await db
+      .insert(companySettings)
+      .values({ companyName: "JOTA Sistemas" })
+      .returning();
+    return newSettings;
+  }
+
+  async updateCompanySettings(updates: UpdateCompanySettings): Promise<CompanySettings> {
+    const current = await this.getCompanySettings();
+    const [updated] = await db
+      .update(companySettings)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(companySettings.id, current.id))
+      .returning();
+    return updated;
   }
 }
 
