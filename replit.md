@@ -10,6 +10,24 @@ The system automatically handles stock deductions when sales are recorded and pr
 
 Preferred communication style: Simple, everyday language.
 
+**Currency Format:** Argentine peso style: $ 20.000,59 (space after $, dot for thousands, comma for decimals) using `Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS' })`.
+
+## Authentication & Authorization
+
+### Authentication Methods
+1. **Email/Password** - Traditional login with bcrypt password hashing
+2. **Google SSO** - Via Replit Auth (OpenID Connect)
+
+### User Roles
+- **admin** - Full system access: products CRUD, sales, reports, user management, audit logs
+- **vendedor** - Limited access: view products, create/edit sales only
+
+### Security Features
+- Session-based authentication with PostgreSQL session store
+- Role validation from database on every protected request
+- SSO users default to "vendedor" role (no privilege escalation)
+- Complete audit trail of all system operations
+
 ## System Architecture
 
 ### Frontend Architecture
