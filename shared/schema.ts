@@ -48,6 +48,7 @@ export type PaymentMethod = typeof paymentMethodEnum[number];
 export const saleOrders = pgTable("sale_orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
+  branchId: varchar("branch_id").references(() => branches.id),
   paymentMethod: text("payment_method").notNull().default("efectivo"),
   paidAmount: decimal("paid_amount", { precision: 10, scale: 2 }),
   changeAmount: decimal("change_amount", { precision: 10, scale: 2 }),
@@ -58,6 +59,7 @@ export const saleOrders = pgTable("sale_orders", {
 export const sales = pgTable("sales", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orderId: varchar("order_id").references(() => saleOrders.id),
+  branchId: varchar("branch_id").references(() => branches.id),
   productId: varchar("product_id").notNull().references(() => products.id),
   userId: varchar("user_id").notNull().references(() => users.id),
   quantity: decimal("quantity", { precision: 10, scale: 3 }).notNull(),
@@ -81,6 +83,7 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
 export const auditLogs = pgTable("audit_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
+  branchId: varchar("branch_id").references(() => branches.id),
   userName: text("user_name").notNull(),
   actionType: text("action_type").notNull(),
   entity: text("entity").notNull(),
@@ -94,6 +97,24 @@ export const companySettings = pgTable("company_settings", {
   companyName: text("company_name").notNull().default("JOTA Sistemas"),
   logoUrl: text("logo_url"),
   updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const branches = pgTable("branches", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  number: integer("number").notNull().unique(),
+  name: text("name").notNull(),
+  address: text("address").notNull(),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const branchStocks = pgTable("branch_stocks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  branchId: varchar("branch_id").notNull().references(() => branches.id),
+  productId: varchar("product_id").notNull().references(() => products.id),
+  stock: decimal("stock", { precision: 10, scale: 3 }).notNull().default("0"),
+  lowStockThreshold: integer("low_stock_threshold").default(10),
 });
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -140,6 +161,28 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   user: one(users, {
     fields: [auditLogs.userId],
     references: [users.id],
+  }),
+  branch: one(branches, {
+    fields: [auditLogs.branchId],
+    references: [branches.id],
+  }),
+}));
+
+export const branchesRelations = relations(branches, ({ many }) => ({
+  stocks: many(branchStocks),
+  saleOrders: many(saleOrders),
+  sales: many(sales),
+  auditLogs: many(auditLogs),
+}));
+
+export const branchStocksRelations = relations(branchStocks, ({ one }) => ({
+  branch: one(branches, {
+    fields: [branchStocks.branchId],
+    references: [branches.id],
+  }),
+  product: one(products, {
+    fields: [branchStocks.productId],
+    references: [products.id],
   }),
 }));
 
@@ -246,6 +289,33 @@ export const updateCompanySettingsSchema = z.object({
   logoUrl: z.string().nullable().optional(),
 });
 
+export const insertBranchSchema = createInsertSchema(branches).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  number: z.coerce.number().min(1, "El número de sucursal es requerido"),
+  name: z.string().min(1, "El nombre de la sucursal es requerido"),
+  address: z.string().min(1, "El domicilio es requerido"),
+  isActive: z.boolean().default(true),
+});
+
+export const updateBranchSchema = z.object({
+  number: z.coerce.number().min(1, "El número de sucursal es requerido").optional(),
+  name: z.string().min(1, "El nombre de la sucursal es requerido").optional(),
+  address: z.string().min(1, "El domicilio es requerido").optional(),
+  isActive: z.boolean().optional(),
+});
+
+export const insertBranchStockSchema = createInsertSchema(branchStocks).omit({
+  id: true,
+}).extend({
+  branchId: z.string().min(1, "La sucursal es requerida"),
+  productId: z.string().min(1, "El producto es requerido"),
+  stock: z.coerce.number().min(0, "El stock debe ser mayor o igual a 0"),
+  lowStockThreshold: z.coerce.number().optional(),
+});
+
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type Product = typeof products.$inferSelect;
@@ -270,4 +340,14 @@ export type SaleWithProduct = Sale & {
 export type SaleOrderWithItems = SaleOrder & {
   items: SaleWithProduct[];
   user?: User;
+};
+
+export type Branch = typeof branches.$inferSelect;
+export type InsertBranch = z.infer<typeof insertBranchSchema>;
+export type UpdateBranch = z.infer<typeof updateBranchSchema>;
+export type BranchStock = typeof branchStocks.$inferSelect;
+export type InsertBranchStock = z.infer<typeof insertBranchStockSchema>;
+
+export type BranchStockWithProduct = BranchStock & {
+  product: Product;
 };
