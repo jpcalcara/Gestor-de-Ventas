@@ -73,8 +73,15 @@ The application uses TanStack Query for all server state, eliminating the need f
 RESTful endpoints following resource-oriented patterns:
 - `GET/POST /api/products` - List and create products
 - `GET/PATCH/DELETE /api/products/:id` - Individual product operations
-- `GET/POST /api/sales` - List and create sales
+- `GET/POST /api/sales` - List and create individual sales
+- `POST /api/sale-orders` - Create cart-based sales with multiple items
 - Automatic stock management on sale creation
+
+**Cart-Based Sales System:**
+- Users add products to a cart before completing the sale
+- Support for 5 payment methods: Efectivo, Débito, Crédito, QR, Transferencia
+- Change calculation for cash (Efectivo) payments
+- Audit logging for all sales transactions
 
 **Validation Strategy:**
 - Shared schema definitions between client and server
@@ -87,21 +94,34 @@ RESTful endpoints following resource-oriented patterns:
 - UUID primary key with auto-generation
 - Title and description (text)
 - Price (decimal with 10,2 precision)
-- Stock quantity (integer, defaults to 0)
+- Stock quantity (decimal with 10,3 precision for weight-based items)
+- Unit type: unidad (count), gramos (weight), litros (volume)
 - Optional image URL (text)
 
-**Sales Table:**
+**Sale Orders Table:**
 - UUID primary key with auto-generation
+- User reference (vendor who made the sale)
+- Payment method: efectivo, debito, credito, qr, transferencia
+- Paid amount and change amount (for cash payments)
+- Total amount (decimal with 10,2 precision)
+- Timestamp for creation tracking
+
+**Sales Table (Order Line Items):**
+- UUID primary key with auto-generation
+- Foreign key reference to sale_orders (nullable for backward compatibility)
 - Foreign key reference to products
-- Quantity sold (integer)
+- Quantity sold (decimal for weight-based items)
+- Unit type at time of sale
 - Unit price snapshot (decimal)
 - Calculated total price (decimal)
-- Timestamp for creation tracking
+- Edit tracking (isEdited flag)
+- Timestamps for creation and updates
 
 **Business Logic:**
 - Sales automatically reduce product stock
 - Price is captured at sale time (preserving historical pricing)
 - Validation prevents negative stock scenarios
+- Change calculation for cash payments
 
 ### Build & Development System
 
