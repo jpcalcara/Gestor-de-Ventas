@@ -36,16 +36,17 @@ export function BusinessBranchSelectorModal() {
 
   const { data: businesses = [], isLoading: businessesLoading } = useQuery<Business[]>({
     queryKey: ["/api/businesses"],
+    enabled: !!user,
   });
 
   const { data: branches = [], isLoading: branchesLoading } = useQuery<Branch[]>({
     queryKey: ["/api/branches", selectedBusiness?.id],
-    enabled: !!selectedBusiness,
+    enabled: !!selectedBusiness && !!user,
   });
 
   const activeBranches = branches.filter((b) => b.isActive);
 
-  if (isBranchLoading || businessesLoading) {
+  if (!user || isBranchLoading || businessesLoading) {
     return null;
   }
 
