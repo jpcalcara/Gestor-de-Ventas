@@ -62,6 +62,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["/api/session/branch"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/businesses"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/branches"] });
       await queryClient.invalidateQueries({ queryKey: ["/api/products"] });
       await queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
       await refetchBranchQuery();

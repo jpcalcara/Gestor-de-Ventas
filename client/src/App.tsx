@@ -5,7 +5,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { Navigation } from "@/components/navigation";
-import { BranchSelectorModal } from "@/components/branch-selector";
+import { BusinessBranchSelectorModal } from "@/components/business-branch-selector";
 import ProductsPage from "@/pages/products";
 import ProductDetailPage from "@/pages/product-detail";
 import SalesPage from "@/pages/sales";
@@ -116,7 +116,7 @@ function AppContent() {
   return (
     <div className="min-h-screen bg-background">
       {user && <Navigation />}
-      {user && <BranchSelectorModal />}
+      {user && <BusinessBranchSelectorModal />}
       <main>
         <Router />
       </main>

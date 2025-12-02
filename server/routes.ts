@@ -957,7 +957,49 @@ export async function registerRoutes(app: Express): Promise<Server> {
         branchId
       );
 
-      res.json({ branchId, branchName: branch.name });
+      res.json({ 
+        businessId: req.session.businessId || null,
+        businessName: req.session.businessName || null,
+        branchId, 
+        branchName: branch.name 
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/session/business", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const businessId = req.body.businessId;
+      if (!businessId) {
+        return res.status(400).json({ message: "Se requiere el ID del negocio" });
+      }
+
+      const userRole = req.session.userRole!;
+      const userId = req.session.userId!;
+      
+      if (userRole === "admin") {
+        const businesses = await storage.getBusinessesForUser(userId);
+        const isMine = businesses.some(b => b.id === businessId);
+        if (!isMine) {
+          return res.status(403).json({ message: "No tiene acceso a este negocio" });
+        }
+      } else if (userRole === "vendedor") {
+        return res.status(403).json({ message: "Los vendedores no pueden cambiar de negocio" });
+      }
+
+      const businessesList = await storage.getBusinesses();
+      const business = businessesList.find(b => b.id === businessId);
+      if (!business) {
+        return res.status(404).json({ message: "Negocio no encontrado" });
+      }
+
+      req.session.businessId = businessId;
+      req.session.businessName = business.name;
+      req.session.branchId = undefined;
+      req.session.branchName = undefined;
+
+      res.json({ businessId, businessName: business.name });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -965,14 +1007,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/session/branch", requireAuth, async (req: Request, res: Response) => {
     try {
+      const businessId = req.session.businessId;
+      const businessName = req.session.businessName;
       const branchId = req.session.branchId;
       const branchName = req.session.branchName;
       
-      if (!branchId) {
-        return res.json({ branchId: null, branchName: null });
-      }
-
-      res.json({ branchId, branchName });
+      res.json({ 
+        businessId: businessId || null, 
+        businessName: businessName || null,
+        branchId: branchId || null, 
+        branchName: branchName || null 
+      });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
