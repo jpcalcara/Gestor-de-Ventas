@@ -674,32 +674,13 @@ export class DatabaseStorage implements IStorage {
     }
 
     if (role === "admin") {
-      const adminBranches = await db
+      // Admins SOLO ven sucursales donde son adminUserId (propietarios)
+      // No ven sucursales de otros admins ni tienen asignaciones vía userBranches
+      return await db
         .select()
         .from(branches)
         .where(eq(branches.adminUserId, userId))
         .orderBy(branches.number);
-      
-      const assignedBranchIds = await db
-        .select({ branchId: userBranches.branchId })
-        .from(userBranches)
-        .where(eq(userBranches.userId, userId));
-      
-      if (assignedBranchIds.length > 0) {
-        const assignedBranches = await db
-          .select()
-          .from(branches)
-          .where(sql`${branches.id} IN (${sql.join(assignedBranchIds.map(b => sql`${b.branchId}`), sql`, `)})`)
-          .orderBy(branches.number);
-        
-        const allBranches = [...adminBranches, ...assignedBranches];
-        const uniqueBranches = allBranches.filter((branch, index, self) =>
-          index === self.findIndex(b => b.id === branch.id)
-        );
-        return uniqueBranches.sort((a, b) => a.number - b.number);
-      }
-      
-      return adminBranches;
     }
 
     const assignedBranchIds = await db
