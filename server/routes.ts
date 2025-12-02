@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertSaleSchema, updateSaleSchema, updateCompanySettingsSchema, insertBranchSchema, updateBranchSchema, insertBranchStockSchema } from "@shared/schema";
+import { insertProductSchema, insertSaleSchema, updateSaleSchema, updateCompanySettingsSchema, insertBranchSchema, updateBranchSchema, insertBranchStockSchema, updateUserBranchesSchema } from "@shared/schema";
 import { fromError } from "zod-validation-error";
 import { registerAuthRoutes, requireAuth, requireAdmin, hashPassword } from "./auth";
 import { z } from "zod";
@@ -572,6 +572,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "usuario",
         req.params.id,
         `Usuario eliminado: ${userToDelete?.firstName} ${userToDelete?.lastName}`
+      );
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/users/:id/branches", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const userWithBranches = await storage.getUserWithBranches(req.params.id);
+      if (!userWithBranches) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      const branchIds = userWithBranches.userBranches?.map(ub => ub.branchId) || [];
+      res.json({ branchIds });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/users/:id/branches", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const currentUser = req.session.userRole;
+      
+      if (currentUser !== "sistemas") {
+        return res.status(403).json({ message: "Solo usuarios sistemas pueden asignar sucursales" });
+      }
+
+      const result = updateUserBranchesSchema.safeParse(req.body);
+      if (!result.success) {
+        const validationError = fromError(result.error);
+        return res.status(400).json({ message: validationError.message });
+      }
+
+      const targetUser = await storage.getUser(req.params.id);
+      if (!targetUser) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      if (targetUser.role === "sistemas") {
+        return res.status(400).json({ message: "No se pueden asignar sucursales a usuarios sistemas" });
+      }
+
+      await storage.setUserBranches(req.params.id, result.data.branchIds);
+
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "asignar_sucursales",
+        "usuario",
+        req.params.id,
+        `Sucursales asignadas a ${targetUser.firstName} ${targetUser.lastName}: ${result.data.branchIds.length} sucursal(es)`
       );
 
       res.json({ success: true });

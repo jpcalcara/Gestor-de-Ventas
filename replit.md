@@ -49,18 +49,44 @@ Preferred communication style: Simple, everyday language.
 - All product and sale operations require and validate session.branchId
 - Storage layer enforces branch isolation at query level (not just route level)
 
+### User-Branch Assignment
+Users are assigned to specific branches based on their role:
+- **sistemas**: Can access ALL branches (no assignment needed)
+- **admin**: Can access branches where:
+  - They are set as `adminUserId` on the branch (business owner)
+  - They are explicitly assigned via `userBranches` table
+- **vendedor**: Can ONLY access branches explicitly assigned via `userBranches` table
+
+The `userBranches` table provides a many-to-many relationship between users and branches:
+```typescript
+userBranches = {
+  id: varchar (UUID),
+  userId: varchar (FK to users),
+  branchId: varchar (FK to branches),
+  createdAt: timestamp
+}
+```
+
+### Assigning Branches to Users
+- Only **sistemas** users can assign branches to other users
+- Navigate to Users page → click the Building icon on any admin/vendedor user
+- Select which branches that user should have access to
+- Changes take effect immediately on next branch selection
+
 ### Branch-Scoped Storage Methods
 All data access goes through branch-scoped methods:
 - **Products**: getProducts(branchId), getProductByBranch(id, branchId), createProduct(+branchId), updateProduct(+branchId), deleteProduct(+branchId)
 - **Sales**: getSalesByBranch(branchId), getSaleByBranch(id, branchId), createSale(+branchId), updateSale(+branchId), deleteSale(+branchId)
 - **Sale Orders**: getSaleOrdersByBranch(branchId), createSaleOrderForBranch(+branchId)
 - **Audit Logs**: getAuditLogsByBranch(branchId)
+- **User Branches**: getUserBranches(userId), getBranchesForUser(userId, role), setUserBranches(userId, branchIds), canUserAccessBranch(userId, branchId, role)
 
 ### Security Enforcement
 - Legacy branch-agnostic methods (getProduct, getSale) have been removed
 - Cross-branch access attempts return 404 (not found in this branch)
 - Stock updates validate product belongs to current branch
 - Sale order creation validates all line items belong to session branch
+- Branch selection validates user has permission via `canUserAccessBranch`
 
 ## System Architecture
 

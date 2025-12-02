@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Pencil, Trash2, Phone, Mail, User, Power, Shield, ShieldCheck, UserCog } from "lucide-react";
+import { Plus, Pencil, Trash2, Phone, Mail, User, Power, Shield, ShieldCheck, UserCog, Building2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -17,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import {
   Form,
@@ -52,6 +53,13 @@ interface UserData {
   createdAt: string;
 }
 
+interface BranchData {
+  id: string;
+  number: number;
+  name: string;
+  isActive: boolean;
+}
+
 const roleLabels: Record<string, { label: string; icon: typeof Shield }> = {
   sistemas: { label: "Sistemas", icon: UserCog },
   admin: { label: "Administrador", icon: ShieldCheck },
@@ -75,6 +83,8 @@ export default function UsersPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
   const [deletingUser, setDeletingUser] = useState<UserData | null>(null);
+  const [assigningBranchesUser, setAssigningBranchesUser] = useState<UserData | null>(null);
+  const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>([]);
 
   const isSistemas = currentUser?.role === "sistemas";
 
@@ -82,6 +92,27 @@ export default function UsersPage() {
     queryKey: ["/api/users"],
     enabled: isAdmin,
   });
+
+  const { data: allBranches = [] } = useQuery<BranchData[]>({
+    queryKey: ["/api/branches"],
+    enabled: isSistemas,
+  });
+
+  const { data: userBranchData } = useQuery<{ branchIds: string[] }>({
+    queryKey: ["/api/users", assigningBranchesUser?.id, "branches"],
+    queryFn: async () => {
+      const res = await fetch(`/api/users/${assigningBranchesUser?.id}/branches`, { credentials: "include" });
+      if (!res.ok) throw new Error("Error al cargar sucursales del usuario");
+      return res.json();
+    },
+    enabled: !!assigningBranchesUser,
+  });
+
+  useEffect(() => {
+    if (userBranchData) {
+      setSelectedBranchIds(userBranchData.branchIds || []);
+    }
+  }, [userBranchData]);
 
   const filteredUsers = users.filter((user) => {
     if (isSistemas) return true;
@@ -162,6 +193,21 @@ export default function UsersPage() {
           ? "El usuario puede acceder al sistema" 
           : "El usuario ya no puede acceder al sistema"
       });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const assignBranchesMutation = useMutation({
+    mutationFn: async ({ userId, branchIds }: { userId: string; branchIds: string[] }) => {
+      return await apiRequest("PATCH", `/api/users/${userId}/branches`, { branchIds });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users", assigningBranchesUser?.id, "branches"] });
+      toast({ title: "Sucursales asignadas correctamente" });
+      setAssigningBranchesUser(null);
+      setSelectedBranchIds([]);
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -477,6 +523,20 @@ export default function UsersPage() {
                           />
                         </div>
                       )}
+                      {isSistemas && user.role !== "sistemas" && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            setAssigningBranchesUser(user);
+                            setSelectedBranchIds([]);
+                          }}
+                          title="Asignar sucursales"
+                          data-testid={`button-assign-branches-${user.id}`}
+                        >
+                          <Building2 className="h-4 w-4" />
+                        </Button>
+                      )}
                       {canEdit && (
                         <Button
                           variant="ghost"
@@ -526,6 +586,92 @@ export default function UsersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog 
+        open={!!assigningBranchesUser} 
+        onOpenChange={(open) => {
+          if (!open) {
+            setAssigningBranchesUser(null);
+            setSelectedBranchIds([]);
+          }
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>
+              Asignar Sucursales a {assigningBranchesUser?.firstName} {assigningBranchesUser?.lastName}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="py-4">
+            <p className="text-sm text-muted-foreground mb-4">
+              Selecciona las sucursales a las que tendrá acceso este usuario:
+            </p>
+            {allBranches.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                No hay sucursales disponibles. Crea una sucursal primero.
+              </p>
+            ) : (
+              <div className="space-y-3 max-h-64 overflow-y-auto">
+                {allBranches.filter(b => b.isActive).map((branch) => (
+                  <div 
+                    key={branch.id} 
+                    className="flex items-center gap-3 p-3 border rounded-lg hover-elevate cursor-pointer"
+                    onClick={() => {
+                      if (selectedBranchIds.includes(branch.id)) {
+                        setSelectedBranchIds(prev => prev.filter(id => id !== branch.id));
+                      } else {
+                        setSelectedBranchIds(prev => [...prev, branch.id]);
+                      }
+                    }}
+                  >
+                    <Checkbox
+                      checked={selectedBranchIds.includes(branch.id)}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          setSelectedBranchIds(prev => [...prev, branch.id]);
+                        } else {
+                          setSelectedBranchIds(prev => prev.filter(id => id !== branch.id));
+                        }
+                      }}
+                      data-testid={`checkbox-branch-${branch.id}`}
+                    />
+                    <div className="flex-1">
+                      <div className="font-medium">
+                        Sucursal {branch.number} - {branch.name}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAssigningBranchesUser(null);
+                setSelectedBranchIds([]);
+              }}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={() => {
+                if (assigningBranchesUser) {
+                  assignBranchesMutation.mutate({
+                    userId: assigningBranchesUser.id,
+                    branchIds: selectedBranchIds,
+                  });
+                }
+              }}
+              disabled={assignBranchesMutation.isPending}
+              data-testid="button-save-branches"
+            >
+              {assignBranchesMutation.isPending ? "Guardando..." : "Guardar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
