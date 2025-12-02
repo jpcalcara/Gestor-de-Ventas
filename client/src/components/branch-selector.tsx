@@ -76,11 +76,7 @@ export function BranchSelectorModal() {
     return null;
   }
 
-  // Usuarios de sistemas nunca ven el modal de seleccionar sucursal
-  if (user?.role === "sistemas") {
-    return null;
-  }
-
+  // Si ya hay una sucursal seleccionada, no mostrar el modal
   if (branchId) {
     return null;
   }
