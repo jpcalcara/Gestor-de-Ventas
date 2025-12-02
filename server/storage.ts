@@ -696,12 +696,13 @@ export class DatabaseStorage implements IStorage {
     }
 
     if (role === "admin") {
-      // Admins SOLO ven sucursales donde son adminUserId (propietarios)
-      // No ven sucursales de otros admins ni tienen asignaciones vía userBranches
+      // Admins SOLO ven sucursales de negocios que administran
       return await db
         .select()
         .from(branches)
-        .where(eq(branches.adminUserId, userId))
+        .where(eq(branches.businessId, 
+          sql`(SELECT id FROM businesses WHERE admin_user_id = ${userId})`
+        ))
         .orderBy(branches.number);
     }
 
@@ -745,7 +746,12 @@ export class DatabaseStorage implements IStorage {
       const [adminBranch] = await db
         .select()
         .from(branches)
-        .where(and(eq(branches.id, branchId), eq(branches.adminUserId, userId)));
+        .where(and(
+          eq(branches.id, branchId),
+          eq(branches.businessId, 
+            sql`(SELECT id FROM businesses WHERE admin_user_id = ${userId})`
+          )
+        ));
       
       if (adminBranch) return true;
     }
