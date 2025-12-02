@@ -106,7 +106,7 @@ export const companySettings = pgTable("company_settings", {
 
 export const branches = pgTable("branches", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  number: integer("number").notNull().unique(),
+  number: integer("number").notNull(),
   name: text("name").notNull(),
   address: text("address").notNull(),
   adminUserId: varchar("admin_user_id").references(() => users.id),
