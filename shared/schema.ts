@@ -29,6 +29,7 @@ export const users = pgTable("users", {
   avatar: text("avatar").default("default"),
   profileImageUrl: text("profile_image_url"),
   googleId: text("google_id").unique(),
+  createdByUserId: varchar("created_by_user_id").references(() => users.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

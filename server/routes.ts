@@ -409,10 +409,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
     role: z.enum(["admin", "vendedor"]).default("vendedor"),
   });
 
-  app.get("/api/users", requireAdmin, async (_req: Request, res: Response) => {
+  app.get("/api/users", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const users = await storage.getUsers();
-      const safeUsers = users.map(u => ({
+      const userId = req.session.userId!;
+      const userRole = req.session.userRole!;
+      const allUsers = await storage.getUsers();
+      
+      let filteredUsers = allUsers;
+      
+      if (userRole === "sistemas") {
+        // Usuarios sistemas ven a TODOS
+        filteredUsers = allUsers;
+      } else if (userRole === "admin") {
+        // Admins ven: a sí mismos + vendedores que ellos crearon
+        filteredUsers = allUsers.filter(u => 
+          u.id === userId || 
+          (u.role === "vendedor" && u.createdByUserId === userId)
+        );
+      } else if (userRole === "vendedor") {
+        // Vendedores solo se ven a sí mismos
+        filteredUsers = allUsers.filter(u => u.id === userId);
+      }
+      
+      const safeUsers = filteredUsers.map(u => ({
         id: u.id,
         email: u.email,
         firstName: u.firstName,
@@ -422,6 +441,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isActive: u.isActive,
         avatar: u.avatar,
         profileImageUrl: u.profileImageUrl,
+        createdByUserId: u.createdByUserId,
         createdAt: u.createdAt,
       }));
       res.json(safeUsers);
