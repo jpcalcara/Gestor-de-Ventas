@@ -14,6 +14,9 @@ export const sessions = pgTable(
   (table) => [index("IDX_session_expire").on(table.expire)],
 );
 
+export const userRoleEnum = ["sistemas", "admin", "vendedor"] as const;
+export type UserRole = typeof userRoleEnum[number];
+
 export const users = pgTable("users", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   email: text("email").notNull().unique(),
@@ -22,6 +25,7 @@ export const users = pgTable("users", {
   lastName: text("last_name").notNull(),
   phone: text("phone"),
   role: text("role").notNull().default("vendedor"),
+  isActive: boolean("is_active").notNull().default(true),
   avatar: text("avatar").default("default"),
   profileImageUrl: text("profile_image_url"),
   googleId: text("google_id").unique(),

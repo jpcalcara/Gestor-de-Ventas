@@ -33,6 +33,11 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     req.session.destroy(() => {});
     return res.status(401).json({ message: "Sesión inválida" });
   }
+
+  if (!user.isActive && user.role !== "sistemas") {
+    req.session.destroy(() => {});
+    return res.status(403).json({ message: "Usuario deshabilitado. Contacte al administrador." });
+  }
   
   req.session.userRole = user.role;
   req.session.userName = `${user.firstName} ${user.lastName}`;
@@ -50,9 +55,35 @@ export async function requireAdmin(req: Request, res: Response, next: NextFuncti
     req.session.destroy(() => {});
     return res.status(401).json({ message: "Sesión inválida" });
   }
+
+  if (!user.isActive && user.role !== "sistemas") {
+    req.session.destroy(() => {});
+    return res.status(403).json({ message: "Usuario deshabilitado. Contacte al administrador." });
+  }
   
-  if (user.role !== "admin") {
+  if (user.role !== "admin" && user.role !== "sistemas") {
     return res.status(403).json({ message: "Acceso denegado. Se requiere rol de administrador" });
+  }
+  
+  req.session.userRole = user.role;
+  req.session.userName = `${user.firstName} ${user.lastName}`;
+  
+  next();
+}
+
+export async function requireSistemas(req: Request, res: Response, next: NextFunction) {
+  if (!req.session.userId) {
+    return res.status(401).json({ message: "No autenticado" });
+  }
+  
+  const user = await storage.getUser(req.session.userId);
+  if (!user) {
+    req.session.destroy(() => {});
+    return res.status(401).json({ message: "Sesión inválida" });
+  }
+  
+  if (user.role !== "sistemas") {
+    return res.status(403).json({ message: "Acceso denegado. Se requiere rol de sistemas" });
   }
   
   req.session.userRole = user.role;
@@ -117,6 +148,10 @@ export function registerAuthRoutes(app: any) {
         return res.status(401).json({ message: "Credenciales inválidas" });
       }
 
+      if (!user.isActive && user.role !== "sistemas") {
+        return res.status(403).json({ message: "Usuario deshabilitado. Contacte al administrador." });
+      }
+
       req.session.userId = user.id;
       req.session.userEmail = user.email;
       req.session.userName = `${user.firstName} ${user.lastName}`;
@@ -129,6 +164,7 @@ export function registerAuthRoutes(app: any) {
         lastName: user.lastName,
         role: user.role,
         avatar: user.avatar,
+        isActive: user.isActive,
       });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -158,6 +194,8 @@ export function registerAuthRoutes(app: any) {
         lastName: user.lastName,
         role: user.role,
         avatar: user.avatar,
+        isActive: user.isActive,
+        profileImageUrl: user.profileImageUrl,
       });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
