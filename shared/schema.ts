@@ -104,12 +104,21 @@ export const companySettings = pgTable("company_settings", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const businesses = pgTable("businesses", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  adminUserId: varchar("admin_user_id").notNull().references(() => users.id),
+  isActive: boolean("is_active").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
 export const branches = pgTable("branches", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessId: varchar("business_id").notNull().references(() => businesses.id),
   number: integer("number").notNull(),
   name: text("name").notNull(),
   address: text("address").notNull(),
-  adminUserId: varchar("admin_user_id").references(() => users.id),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -197,7 +206,19 @@ export const auditLogsRelations = relations(auditLogs, ({ one }) => ({
   }),
 }));
 
-export const branchesRelations = relations(branches, ({ many }) => ({
+export const businessesRelations = relations(businesses, ({ one, many }) => ({
+  admin: one(users, {
+    fields: [businesses.adminUserId],
+    references: [users.id],
+  }),
+  branches: many(branches),
+}));
+
+export const branchesRelations = relations(branches, ({ one, many }) => ({
+  business: one(businesses, {
+    fields: [branches.businessId],
+    references: [businesses.id],
+  }),
   stocks: many(branchStocks),
   saleOrders: many(saleOrders),
   sales: many(sales),
@@ -320,15 +341,25 @@ export const updateCompanySettingsSchema = z.object({
   logoUrl: z.string().nullable().optional(),
 });
 
+export const insertBusinessSchema = createInsertSchema(businesses).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+}).extend({
+  name: z.string().min(1, "El nombre del negocio es requerido"),
+  adminUserId: z.string().min(1, "El administrador es requerido"),
+  isActive: z.boolean().default(true),
+});
+
 export const insertBranchSchema = createInsertSchema(branches).omit({
   id: true,
+  businessId: true,
   createdAt: true,
   updatedAt: true,
 }).extend({
   number: z.coerce.number().min(1, "El número de sucursal es requerido"),
   name: z.string().min(1, "El nombre de la sucursal es requerido"),
   address: z.string().min(1, "El domicilio es requerido"),
-  adminUserId: z.string().nullable().optional(),
   isActive: z.boolean().default(true),
 });
 
@@ -375,6 +406,8 @@ export type SaleOrderWithItems = SaleOrder & {
   user?: User;
 };
 
+export type Business = typeof businesses.$inferSelect;
+export type InsertBusiness = z.infer<typeof insertBusinessSchema>;
 export type Branch = typeof branches.$inferSelect;
 export type InsertBranch = z.infer<typeof insertBranchSchema>;
 export type UpdateBranch = z.infer<typeof updateBranchSchema>;

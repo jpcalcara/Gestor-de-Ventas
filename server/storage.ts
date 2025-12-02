@@ -17,6 +17,8 @@ import {
   type InsertPasswordResetToken,
   type CompanySettings,
   type UpdateCompanySettings,
+  type Business,
+  type InsertBusiness,
   type Branch,
   type InsertBranch,
   type UpdateBranch,
@@ -32,6 +34,7 @@ import {
   auditLogs,
   passwordResetTokens,
   companySettings,
+  businesses,
   branches,
   branchStocks,
   userBranches,
@@ -73,9 +76,12 @@ export interface IStorage {
   getCompanySettings(): Promise<CompanySettings>;
   updateCompanySettings(updates: UpdateCompanySettings): Promise<CompanySettings>;
   
+  getBusinesses(): Promise<Business[]>;
+  getBusinessesForUser(userId: string): Promise<Business[]>;
   getBranches(): Promise<Branch[]>;
+  getBranchesForBusiness(businessId: string): Promise<Branch[]>;
   getBranch(id: string): Promise<Branch | undefined>;
-  createBranch(branch: InsertBranch): Promise<Branch>;
+  createBranch(branch: InsertBranch & { businessId: string }): Promise<Branch>;
   updateBranch(id: string, updates: UpdateBranch): Promise<Branch | undefined>;
   deleteBranch(id: string): Promise<boolean>;
   
@@ -428,8 +434,24 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
+  async getBusinesses(): Promise<Business[]> {
+    return await db.select().from(businesses).where(eq(businesses.isActive, true));
+  }
+
+  async getBusinessesForUser(userId: string): Promise<Business[]> {
+    return await db.select().from(businesses).where(
+      and(eq(businesses.adminUserId, userId), eq(businesses.isActive, true))
+    );
+  }
+
   async getBranches(): Promise<Branch[]> {
     return await db.select().from(branches).orderBy(branches.number);
+  }
+
+  async getBranchesForBusiness(businessId: string): Promise<Branch[]> {
+    return await db.select().from(branches).where(
+      and(eq(branches.businessId, businessId), eq(branches.isActive, true))
+    ).orderBy(branches.number);
   }
 
   async getBranch(id: string): Promise<Branch | undefined> {
@@ -437,7 +459,7 @@ export class DatabaseStorage implements IStorage {
     return branch || undefined;
   }
 
-  async createBranch(insertBranch: InsertBranch): Promise<Branch> {
+  async createBranch(insertBranch: InsertBranch & { businessId: string }): Promise<Branch> {
     const [branch] = await db
       .insert(branches)
       .values(insertBranch)
