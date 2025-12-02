@@ -5,6 +5,8 @@ import type { User } from "@shared/schema";
 import { apiRequest, queryClient } from "./queryClient";
 
 interface BranchSession {
+  businessId: string | null;
+  businessName: string | null;
   branchId: string | null;
   branchName: string | null;
 }
@@ -18,9 +20,12 @@ interface AuthContextType {
   refetchUser: () => Promise<void>;
   isAdmin: boolean;
   isVendedor: boolean;
+  businessId: string | null;
+  businessName: string | null;
   branchId: string | null;
   branchName: string | null;
   isBranchLoading: boolean;
+  selectBusiness: (businessId: string) => Promise<void>;
   selectBranch: (branchId: string) => Promise<void>;
   refetchBranch: () => Promise<void>;
 }
@@ -51,6 +56,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await refetchBranchQuery();
   };
 
+  const selectBusinessMutation = useMutation({
+    mutationFn: async (businessId: string) => {
+      return await apiRequest("POST", "/api/session/business", { businessId });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["/api/session/branch"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      await queryClient.invalidateQueries({ queryKey: ["/api/sales"] });
+      await refetchBranchQuery();
+    },
+  });
+
   const selectBranchMutation = useMutation({
     mutationFn: async (branchId: string) => {
       return await apiRequest("POST", "/api/session/branch", { branchId });
@@ -62,6 +79,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await refetchBranchQuery();
     },
   });
+
+  const selectBusiness = async (businessId: string) => {
+    await selectBusinessMutation.mutateAsync(businessId);
+  };
 
   const selectBranch = async (branchId: string) => {
     await selectBranchMutation.mutateAsync(branchId);
@@ -114,9 +135,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       refetchUser, 
       isAdmin, 
       isVendedor,
+      businessId: branchSession?.businessId || null,
+      businessName: branchSession?.businessName || null,
       branchId: branchSession?.branchId || null,
       branchName: branchSession?.branchName || null,
       isBranchLoading,
+      selectBusiness,
       selectBranch,
       refetchBranch,
     }}>

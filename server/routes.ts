@@ -750,29 +750,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/branches", requireAuth, async (req: Request, res: Response) => {
     try {
+      const businessId = req.query.businessId as string;
+      
+      if (businessId) {
+        const branchesList = await storage.getBranchesForBusiness(businessId);
+        return res.json(branchesList);
+      }
+      
       const userId = req.session.userId!;
       const userRole = req.session.userRole!;
-      
       const branchesList = await storage.getBranchesForUser(userId, userRole);
-      const branchesWithAdmin = await Promise.all(
-        branchesList.map(async (branch) => {
-          if (branch.adminUserId) {
-            const adminUser = await storage.getUser(branch.adminUserId);
-            return {
-              ...branch,
-              adminUser: adminUser ? {
-                id: adminUser.id,
-                email: adminUser.email,
-                firstName: adminUser.firstName,
-                lastName: adminUser.lastName,
-                role: adminUser.role,
-              } : undefined,
-            };
-          }
-          return branch;
-        })
-      );
-      res.json(branchesWithAdmin);
+      res.json(branchesList);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -792,7 +780,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/branches", requireAdmin, async (req: Request, res: Response) => {
     try {
-      // Solo sistemas puede crear sucursales
       if (req.session.userRole !== "sistemas") {
         return res.status(403).json({ message: "Solo usuarios sistemas pueden crear sucursales" });
       }
@@ -803,7 +790,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: validationError.message });
       }
 
-      const branch = await storage.createBranch(result.data);
+      const businessId = req.body.businessId as string;
+      if (!businessId) {
+        return res.status(400).json({ message: "El negocio es requerido" });
+      }
+
+      const branch = await storage.createBranch({ ...result.data, businessId });
       
       await createAuditLog(
         req.session.userId!,
@@ -811,14 +803,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "crear_sucursal",
         "sucursal",
         branch.id,
-        `Sucursal creada: ${branch.name}`
+        `Sucursal creada: ${branch.name}`,
+        branch.businessId
       );
       
       res.status(201).json(branch);
     } catch (error: any) {
-      if (error.message?.includes("duplicate key")) {
-        return res.status(400).json({ message: "El número de sucursal ya existe" });
-      }
       res.status(500).json({ message: error.message });
     }
   });
