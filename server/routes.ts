@@ -421,11 +421,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Usuarios sistemas ven a TODOS
         filteredUsers = allUsers;
       } else if (userRole === "admin") {
-        // Admins ven: a sí mismos + vendedores que ellos crearon
-        filteredUsers = allUsers.filter(u => 
-          u.id === userId || 
-          (u.role === "vendedor" && u.createdByUserId === userId)
-        );
+        // Admins solo ven a sí mismos por ahora
+        // TODO: Implementar filtrado por createdByUserId cuando la BD esté actualizada
+        filteredUsers = allUsers.filter(u => u.id === userId);
       } else if (userRole === "vendedor") {
         // Vendedores solo se ven a sí mismos
         filteredUsers = allUsers.filter(u => u.id === userId);
@@ -441,7 +439,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isActive: u.isActive,
         avatar: u.avatar,
         profileImageUrl: u.profileImageUrl,
-        createdByUserId: u.createdByUserId,
         createdAt: u.createdAt,
       }));
       res.json(safeUsers);
