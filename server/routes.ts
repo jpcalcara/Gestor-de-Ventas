@@ -601,7 +601,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/branches", requireAuth, async (_req: Request, res: Response) => {
     try {
       const branchesList = await storage.getBranches();
-      res.json(branchesList);
+      const branchesWithAdmin = await Promise.all(
+        branchesList.map(async (branch) => {
+          if (branch.adminUserId) {
+            const adminUser = await storage.getUser(branch.adminUserId);
+            return {
+              ...branch,
+              adminUser: adminUser ? {
+                id: adminUser.id,
+                email: adminUser.email,
+                firstName: adminUser.firstName,
+                lastName: adminUser.lastName,
+                role: adminUser.role,
+              } : undefined,
+            };
+          }
+          return branch;
+        })
+      );
+      res.json(branchesWithAdmin);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -625,6 +643,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!result.success) {
         const validationError = fromError(result.error);
         return res.status(400).json({ message: validationError.message });
+      }
+
+      if (result.data.adminUserId && req.session.userRole !== "sistemas") {
+        return res.status(403).json({ message: "Solo usuarios sistemas pueden asignar un administrador a la sucursal" });
       }
 
       const branch = await storage.createBranch(result.data);
@@ -653,6 +675,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!result.success) {
         const validationError = fromError(result.error);
         return res.status(400).json({ message: validationError.message });
+      }
+
+      if (result.data.adminUserId !== undefined && req.session.userRole !== "sistemas") {
+        return res.status(403).json({ message: "Solo usuarios sistemas pueden modificar el administrador de la sucursal" });
       }
 
       const branch = await storage.updateBranch(req.params.id, result.data);

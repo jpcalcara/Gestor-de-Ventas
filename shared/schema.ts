@@ -108,6 +108,7 @@ export const branches = pgTable("branches", {
   number: integer("number").notNull().unique(),
   name: text("name").notNull(),
   address: text("address").notNull(),
+  adminUserId: varchar("admin_user_id").references(() => users.id),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -301,6 +302,7 @@ export const insertBranchSchema = createInsertSchema(branches).omit({
   number: z.coerce.number().min(1, "El número de sucursal es requerido"),
   name: z.string().min(1, "El nombre de la sucursal es requerido"),
   address: z.string().min(1, "El domicilio es requerido"),
+  adminUserId: z.string().nullable().optional(),
   isActive: z.boolean().default(true),
 });
 
@@ -308,6 +310,7 @@ export const updateBranchSchema = z.object({
   number: z.coerce.number().min(1, "El número de sucursal es requerido").optional(),
   name: z.string().min(1, "El nombre de la sucursal es requerido").optional(),
   address: z.string().min(1, "El domicilio es requerido").optional(),
+  adminUserId: z.string().nullable().optional(),
   isActive: z.boolean().optional(),
 });
 

@@ -3,13 +3,20 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Pencil, Trash2, MapPin, Building2, Hash } from "lucide-react";
+import { Plus, Pencil, Trash2, MapPin, Building2, Hash, User } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -38,11 +45,21 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+interface UserData {
+  id: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  role: string;
+}
+
 interface BranchData {
   id: string;
   number: number;
   name: string;
   address: string;
+  adminUserId: string | null;
+  adminUser?: UserData;
   isActive: boolean;
   createdAt: string;
   updatedAt?: string;
@@ -52,13 +69,14 @@ const branchFormSchema = z.object({
   number: z.coerce.number().min(1, "El número es requerido"),
   name: z.string().min(1, "El nombre es requerido"),
   address: z.string().min(1, "El domicilio es requerido"),
+  adminUserId: z.string().nullable().optional(),
   isActive: z.boolean().default(true),
 });
 
 type BranchFormValues = z.infer<typeof branchFormSchema>;
 
 export default function BranchesPage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user } = useAuth();
   const { toast } = useToast();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingBranch, setEditingBranch] = useState<BranchData | null>(null);
@@ -69,12 +87,24 @@ export default function BranchesPage() {
     enabled: isAdmin,
   });
 
+  const { data: adminUsers = [] } = useQuery<UserData[]>({
+    queryKey: ["/api/users", "admins"],
+    queryFn: async () => {
+      const res = await fetch("/api/users");
+      if (!res.ok) throw new Error("Error al cargar usuarios");
+      const users: UserData[] = await res.json();
+      return users.filter(u => u.role === "admin");
+    },
+    enabled: isAdmin && user?.role === "sistemas",
+  });
+
   const form = useForm<BranchFormValues>({
     resolver: zodResolver(branchFormSchema),
     defaultValues: {
       number: 1,
       name: "",
       address: "",
+      adminUserId: null,
       isActive: true,
     },
   });
@@ -137,6 +167,7 @@ export default function BranchesPage() {
       number: branch.number,
       name: branch.name,
       address: branch.address,
+      adminUserId: branch.adminUserId,
       isActive: branch.isActive,
     });
   };
@@ -150,6 +181,7 @@ export default function BranchesPage() {
       number: nextNumber,
       name: "",
       address: "",
+      adminUserId: null,
       isActive: true,
     });
     setIsDialogOpen(true);
@@ -249,6 +281,39 @@ export default function BranchesPage() {
                     </FormItem>
                   )}
                 />
+                {user?.role === "sistemas" && (
+                  <FormField
+                    control={form.control}
+                    name="adminUserId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Administrador del Negocio</FormLabel>
+                        <Select
+                          value={field.value || "none"}
+                          onValueChange={(value) => field.onChange(value === "none" ? null : value)}
+                        >
+                          <FormControl>
+                            <SelectTrigger data-testid="select-admin-user">
+                              <SelectValue placeholder="Seleccionar administrador (opcional)" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            <SelectItem value="none">Sin administrador asignado</SelectItem>
+                            {adminUsers.map((adminUser) => (
+                              <SelectItem key={adminUser.id} value={adminUser.id}>
+                                {adminUser.firstName} {adminUser.lastName} ({adminUser.email})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">
+                          Asocia esta sucursal a un usuario administrador para identificar el negocio
+                        </p>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
                 <FormField
                   control={form.control}
                   name="isActive"
@@ -348,6 +413,14 @@ export default function BranchesPage() {
                   <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
                   <span className="text-muted-foreground">{branch.address}</span>
                 </div>
+                {branch.adminUser && (
+                  <div className="flex items-start gap-2 text-sm">
+                    <User className="h-4 w-4 text-muted-foreground mt-0.5" />
+                    <span className="text-muted-foreground">
+                      Admin: {branch.adminUser.firstName} {branch.adminUser.lastName}
+                    </span>
+                  </div>
+                )}
                 <div className="flex justify-end gap-2 pt-2">
                   <Button
                     size="sm"
