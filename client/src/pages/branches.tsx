@@ -81,6 +81,8 @@ export default function BranchesPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingBranch, setEditingBranch] = useState<BranchData | null>(null);
   const [deletingBranch, setDeletingBranch] = useState<BranchData | null>(null);
+  const [productCountToDelete, setProductCountToDelete] = useState<number>(0);
+  const [confirmDeleteWithProducts, setConfirmDeleteWithProducts] = useState(false);
 
   const { data: branches = [], isLoading } = useQuery<BranchData[]>({
     queryKey: ["/api/branches"],
@@ -140,16 +142,36 @@ export default function BranchesPage() {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (id: string) => {
-      return await apiRequest("DELETE", `/api/branches/${id}`);
+    mutationFn: async ({ id, force = false }: { id: string; force?: boolean }) => {
+      const url = force ? `/api/branches/${id}?force=true` : `/api/branches/${id}`;
+      const res = await fetch(url, { method: "DELETE", credentials: "include" });
+      const data = await res.json();
+      if (!res.ok) {
+        if (data.requiresConfirmation) {
+          throw { ...data, isConfirmationRequired: true };
+        }
+        throw new Error(data.message || "Error al eliminar");
+      }
+      return data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["/api/branches"] });
-      toast({ title: "Sucursal eliminada correctamente" });
+      queryClient.invalidateQueries({ queryKey: ["/api/products"] });
+      const message = data.deletedProducts > 0 
+        ? `Sucursal eliminada con ${data.deletedProducts} producto(s)` 
+        : "Sucursal eliminada correctamente";
+      toast({ title: message });
       setDeletingBranch(null);
+      setConfirmDeleteWithProducts(false);
+      setProductCountToDelete(0);
     },
-    onError: (error: Error) => {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+    onError: (error: any) => {
+      if (error.isConfirmationRequired) {
+        setProductCountToDelete(error.productCount || 0);
+        setConfirmDeleteWithProducts(true);
+      } else {
+        toast({ title: "Error", description: error.message, variant: "destructive" });
+      }
     },
   });
 
@@ -445,23 +467,54 @@ export default function BranchesPage() {
         </div>
       )}
 
-      <AlertDialog open={!!deletingBranch} onOpenChange={(open) => !open && setDeletingBranch(null)}>
+      <AlertDialog 
+        open={!!deletingBranch} 
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeletingBranch(null);
+            setConfirmDeleteWithProducts(false);
+            setProductCountToDelete(0);
+          }
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>¿Eliminar sucursal?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {confirmDeleteWithProducts ? "¡Advertencia! Sucursal con productos" : "¿Eliminar sucursal?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Esta acción no se puede deshacer. Se eliminará la sucursal
-              "{deletingBranch?.name}" (Nº {deletingBranch?.number}) y toda la información asociada.
+              {confirmDeleteWithProducts ? (
+                <>
+                  La sucursal "{deletingBranch?.name}" (Nº {deletingBranch?.number}) tiene{" "}
+                  <strong>{productCountToDelete} producto(s)</strong> que también serán eliminados.
+                  <br /><br />
+                  Esta acción no se puede deshacer. ¿Está seguro que desea continuar?
+                </>
+              ) : (
+                <>
+                  Esta acción no se puede deshacer. Se eliminará la sucursal
+                  "{deletingBranch?.name}" (Nº {deletingBranch?.number}).
+                </>
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel data-testid="button-cancel-delete-branch">Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => deletingBranch && deleteMutation.mutate(deletingBranch.id)}
+              onClick={() => {
+                if (deletingBranch) {
+                  deleteMutation.mutate({ id: deletingBranch.id, force: confirmDeleteWithProducts });
+                }
+              }}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               data-testid="button-confirm-delete-branch"
             >
-              {deleteMutation.isPending ? "Eliminando..." : "Eliminar"}
+              {deleteMutation.isPending 
+                ? "Eliminando..." 
+                : confirmDeleteWithProducts 
+                  ? "Eliminar todo" 
+                  : "Eliminar"
+              }
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
