@@ -38,6 +38,7 @@ export type UnitType = typeof unitTypeEnum[number];
 
 export const products = pgTable("products", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  branchId: varchar("branch_id").notNull().references(() => branches.id),
   title: text("title").notNull(),
   description: text("description").notNull(),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
@@ -135,7 +136,11 @@ export const passwordResetTokensRelations = relations(passwordResetTokens, ({ on
   }),
 }));
 
-export const productsRelations = relations(products, ({ many }) => ({
+export const productsRelations = relations(products, ({ one, many }) => ({
+  branch: one(branches, {
+    fields: [products.branchId],
+    references: [branches.id],
+  }),
   sales: many(sales),
 }));
 
@@ -229,6 +234,7 @@ export const loginSchema = z.object({
 
 export const insertProductSchema = createInsertSchema(products).omit({
   id: true,
+  branchId: true,
 }).extend({
   price: z.coerce.number().min(0, "El precio debe ser mayor o igual a 0"),
   stock: z.coerce.number().min(0, "El stock debe ser mayor o igual a 0"),

@@ -66,9 +66,13 @@ async function createAuditLog(
 export async function registerRoutes(app: Express): Promise<Server> {
   registerAuthRoutes(app);
   
-  app.get("/api/products", requireAuth, async (_req: Request, res: Response) => {
+  app.get("/api/products", requireAuth, async (req: Request, res: Response) => {
     try {
-      const products = await storage.getProducts();
+      const branchId = req.session.branchId;
+      if (!branchId) {
+        return res.status(400).json({ message: "Debe seleccionar una sucursal primero" });
+      }
+      const products = await storage.getProducts(branchId);
       res.json(products);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -77,9 +81,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/products/:id", requireAuth, async (req: Request, res: Response) => {
     try {
-      const product = await storage.getProduct(req.params.id);
+      const branchId = req.session.branchId;
+      if (!branchId) {
+        return res.status(400).json({ message: "Debe seleccionar una sucursal primero" });
+      }
+      const product = await storage.getProductByBranch(req.params.id, branchId);
       if (!product) {
-        return res.status(404).json({ message: "Producto no encontrado" });
+        return res.status(404).json({ message: "Producto no encontrado en esta sucursal" });
       }
       res.json(product);
     } catch (error: any) {
@@ -89,13 +97,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/products", requireAdmin, async (req: Request, res: Response) => {
     try {
+      const branchId = req.session.branchId;
+      if (!branchId) {
+        return res.status(400).json({ message: "Debe seleccionar una sucursal primero" });
+      }
+      
       const result = insertProductSchema.safeParse(req.body);
       if (!result.success) {
         const validationError = fromError(result.error);
         return res.status(400).json({ message: validationError.message });
       }
 
-      const product = await storage.createProduct(result.data);
+      const product = await storage.createProduct({ ...result.data, branchId });
       
       await createAuditLog(
         req.session.userId!,
@@ -103,7 +116,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "crear",
         "producto",
         product.id,
-        `Producto creado: ${product.title}`
+        `Producto creado: ${product.title}`,
+        branchId
       );
       
       res.status(201).json(product);
@@ -114,15 +128,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/products/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
+      const branchId = req.session.branchId;
+      if (!branchId) {
+        return res.status(400).json({ message: "Debe seleccionar una sucursal primero" });
+      }
+      
       const result = insertProductSchema.safeParse(req.body);
       if (!result.success) {
         const validationError = fromError(result.error);
         return res.status(400).json({ message: validationError.message });
       }
 
-      const product = await storage.updateProduct(req.params.id, result.data);
+      const product = await storage.updateProduct(req.params.id, result.data, branchId);
       if (!product) {
-        return res.status(404).json({ message: "Producto no encontrado" });
+        return res.status(404).json({ message: "Producto no encontrado en esta sucursal" });
       }
       
       await createAuditLog(
@@ -131,7 +150,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "editar",
         "producto",
         product.id,
-        `Producto editado: ${product.title}`
+        `Producto editado: ${product.title}`,
+        branchId
       );
       
       res.json(product);
@@ -142,10 +162,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/products/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const productToDelete = await storage.getProduct(req.params.id);
-      const deleted = await storage.deleteProduct(req.params.id);
+      const branchId = req.session.branchId;
+      if (!branchId) {
+        return res.status(400).json({ message: "Debe seleccionar una sucursal primero" });
+      }
+      
+      const productToDelete = await storage.getProductByBranch(req.params.id, branchId);
+      if (!productToDelete) {
+        return res.status(404).json({ message: "Producto no encontrado en esta sucursal" });
+      }
+      
+      const deleted = await storage.deleteProduct(req.params.id, branchId);
       if (!deleted) {
-        return res.status(404).json({ message: "Producto no encontrado" });
+        return res.status(404).json({ message: "Producto no encontrado en esta sucursal" });
       }
       
       await createAuditLog(
@@ -154,7 +183,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "eliminar",
         "producto",
         req.params.id,
-        `Producto eliminado: ${productToDelete?.title || 'Desconocido'}`
+        `Producto eliminado: ${productToDelete.title}`,
+        branchId
       );
       
       res.json({ success: true });

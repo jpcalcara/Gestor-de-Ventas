@@ -38,11 +38,12 @@ import { db } from "./db";
 import { eq, desc, sql, and } from "drizzle-orm";
 
 export interface IStorage {
-  getProducts(): Promise<Product[]>;
+  getProducts(branchId?: string): Promise<Product[]>;
   getProduct(id: string): Promise<Product | undefined>;
-  createProduct(product: InsertProduct): Promise<Product>;
-  updateProduct(id: string, product: InsertProduct): Promise<Product | undefined>;
-  deleteProduct(id: string): Promise<boolean>;
+  getProductByBranch(id: string, branchId: string): Promise<Product | undefined>;
+  createProduct(product: InsertProduct & { branchId: string }): Promise<Product>;
+  updateProduct(id: string, product: InsertProduct, branchId: string): Promise<Product | undefined>;
+  deleteProduct(id: string, branchId: string): Promise<boolean>;
   
   getSales(): Promise<SaleWithProduct[]>;
   getSale(id: string): Promise<Sale | undefined>;
@@ -93,7 +94,10 @@ export interface IStorage {
 }
 
 export class DatabaseStorage implements IStorage {
-  async getProducts(): Promise<Product[]> {
+  async getProducts(branchId?: string): Promise<Product[]> {
+    if (branchId) {
+      return await db.select().from(products).where(eq(products.branchId, branchId));
+    }
     return await db.select().from(products);
   }
 
@@ -102,31 +106,41 @@ export class DatabaseStorage implements IStorage {
     return product || undefined;
   }
 
-  async createProduct(insertProduct: InsertProduct): Promise<Product> {
+  async getProductByBranch(id: string, branchId: string): Promise<Product | undefined> {
+    const [product] = await db.select().from(products).where(
+      and(eq(products.id, id), eq(products.branchId, branchId))
+    );
+    return product || undefined;
+  }
+
+  async createProduct(insertProduct: InsertProduct & { branchId: string }): Promise<Product> {
     const [product] = await db
       .insert(products)
       .values({
         ...insertProduct,
         price: String(insertProduct.price),
+        branchId: insertProduct.branchId,
       })
       .returning();
     return product;
   }
 
-  async updateProduct(id: string, insertProduct: InsertProduct): Promise<Product | undefined> {
+  async updateProduct(id: string, insertProduct: InsertProduct, branchId: string): Promise<Product | undefined> {
     const [updated] = await db
       .update(products)
       .set({
         ...insertProduct,
         price: String(insertProduct.price),
       })
-      .where(eq(products.id, id))
+      .where(and(eq(products.id, id), eq(products.branchId, branchId)))
       .returning();
     return updated || undefined;
   }
 
-  async deleteProduct(id: string): Promise<boolean> {
-    const result = await db.delete(products).where(eq(products.id, id));
+  async deleteProduct(id: string, branchId: string): Promise<boolean> {
+    const result = await db.delete(products).where(
+      and(eq(products.id, id), eq(products.branchId, branchId))
+    );
     return result.rowCount !== null && result.rowCount > 0;
   }
 
