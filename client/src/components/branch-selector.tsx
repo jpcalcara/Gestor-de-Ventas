@@ -76,6 +76,11 @@ export function BranchSelectorModal() {
     return null;
   }
 
+  // Usuarios de sistemas nunca ven el modal de seleccionar sucursal
+  if (user?.role === "sistemas") {
+    return null;
+  }
+
   if (branchId) {
     return null;
   }
