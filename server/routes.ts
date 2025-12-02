@@ -1007,10 +1007,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/session/branch", requireAuth, async (req: Request, res: Response) => {
     try {
-      const businessId = req.session.businessId;
-      const businessName = req.session.businessName;
+      let businessId = req.session.businessId;
+      let businessName = req.session.businessName;
       const branchId = req.session.branchId;
       const branchName = req.session.branchName;
+      
+      if (!businessId && req.session.userRole === "admin") {
+        const businesses = await storage.getBusinessesForUser(req.session.userId!);
+        if (businesses.length > 0) {
+          businessId = businesses[0].id;
+          businessName = businesses[0].name;
+          req.session.businessId = businessId;
+          req.session.businessName = businessName;
+        }
+      }
       
       res.json({ 
         businessId: businessId || null, 
