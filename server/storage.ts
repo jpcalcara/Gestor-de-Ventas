@@ -687,21 +687,16 @@ export class DatabaseStorage implements IStorage {
         const [product] = await tx
           .select()
           .from(products)
-          .where(eq(products.id, item.productId));
-
-        if (!product) {
-          throw new Error(`Producto no encontrado: ${item.productTitle}`);
-        }
-
-        const [branchStock] = await tx
-          .select()
-          .from(branchStocks)
           .where(and(
-            eq(branchStocks.branchId, order.branchId),
-            eq(branchStocks.productId, item.productId)
+            eq(products.id, item.productId),
+            eq(products.branchId, order.branchId)
           ));
 
-        const currentStock = branchStock ? Number(branchStock.stock) : 0;
+        if (!product) {
+          throw new Error(`Producto no encontrado en esta sucursal: ${item.productTitle}`);
+        }
+
+        const currentStock = Number(product.stock);
         const quantity = Number(item.quantity);
         
         if (currentStock < quantity) {
@@ -744,20 +739,13 @@ export class DatabaseStorage implements IStorage {
             totalPrice,
           });
 
-        const [branchStock] = await tx
-          .select()
-          .from(branchStocks)
+        await tx
+          .update(products)
+          .set({ stock: sql`stock - ${quantity}` })
           .where(and(
-            eq(branchStocks.branchId, order.branchId),
-            eq(branchStocks.productId, item.productId)
+            eq(products.id, item.productId),
+            eq(products.branchId, order.branchId)
           ));
-
-        if (branchStock) {
-          await tx
-            .update(branchStocks)
-            .set({ stock: sql`stock - ${quantity}` })
-            .where(eq(branchStocks.id, branchStock.id));
-        }
       }
 
       return saleOrder;
