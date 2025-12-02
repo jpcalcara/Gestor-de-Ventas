@@ -23,6 +23,8 @@ import {
   type BranchStock,
   type InsertBranchStock,
   type BranchStockWithProduct,
+  type UserBranch,
+  type UserWithBranches,
   products,
   sales,
   saleOrders,
@@ -32,6 +34,7 @@ import {
   companySettings,
   branches,
   branchStocks,
+  userBranches,
   updateSaleSchema,
 } from "@shared/schema";
 import { db } from "./db";
@@ -86,6 +89,12 @@ export interface IStorage {
   createSaleOrderForBranch(order: InsertSaleOrder & { userId: string; branchId: string }): Promise<SaleOrder>;
   
   getAuditLogsByBranch(branchId: string): Promise<AuditLog[]>;
+  
+  getUserBranches(userId: string): Promise<UserBranch[]>;
+  getBranchesForUser(userId: string, role: string): Promise<Branch[]>;
+  setUserBranches(userId: string, branchIds: string[]): Promise<void>;
+  canUserAccessBranch(userId: string, branchId: string, role: string): Promise<boolean>;
+  getUserWithBranches(userId: string): Promise<UserWithBranches | undefined>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -650,6 +659,122 @@ export class DatabaseStorage implements IStorage {
       .from(auditLogs)
       .where(eq(auditLogs.branchId, branchId))
       .orderBy(desc(auditLogs.createdAt));
+  }
+
+  async getUserBranches(userId: string): Promise<UserBranch[]> {
+    return await db
+      .select()
+      .from(userBranches)
+      .where(eq(userBranches.userId, userId));
+  }
+
+  async getBranchesForUser(userId: string, role: string): Promise<Branch[]> {
+    if (role === "sistemas") {
+      return await db.select().from(branches).orderBy(branches.number);
+    }
+
+    if (role === "admin") {
+      const adminBranches = await db
+        .select()
+        .from(branches)
+        .where(eq(branches.adminUserId, userId))
+        .orderBy(branches.number);
+      
+      const assignedBranchIds = await db
+        .select({ branchId: userBranches.branchId })
+        .from(userBranches)
+        .where(eq(userBranches.userId, userId));
+      
+      if (assignedBranchIds.length > 0) {
+        const assignedBranches = await db
+          .select()
+          .from(branches)
+          .where(sql`${branches.id} IN (${sql.join(assignedBranchIds.map(b => sql`${b.branchId}`), sql`, `)})`)
+          .orderBy(branches.number);
+        
+        const allBranches = [...adminBranches, ...assignedBranches];
+        const uniqueBranches = allBranches.filter((branch, index, self) =>
+          index === self.findIndex(b => b.id === branch.id)
+        );
+        return uniqueBranches.sort((a, b) => a.number - b.number);
+      }
+      
+      return adminBranches;
+    }
+
+    const assignedBranchIds = await db
+      .select({ branchId: userBranches.branchId })
+      .from(userBranches)
+      .where(eq(userBranches.userId, userId));
+
+    if (assignedBranchIds.length === 0) {
+      return [];
+    }
+
+    return await db
+      .select()
+      .from(branches)
+      .where(sql`${branches.id} IN (${sql.join(assignedBranchIds.map(b => sql`${b.branchId}`), sql`, `)})`)
+      .orderBy(branches.number);
+  }
+
+  async setUserBranches(userId: string, branchIds: string[]): Promise<void> {
+    await db.transaction(async (tx) => {
+      await tx.delete(userBranches).where(eq(userBranches.userId, userId));
+      
+      if (branchIds.length > 0) {
+        await tx.insert(userBranches).values(
+          branchIds.map(branchId => ({
+            userId,
+            branchId,
+          }))
+        );
+      }
+    });
+  }
+
+  async canUserAccessBranch(userId: string, branchId: string, role: string): Promise<boolean> {
+    if (role === "sistemas") {
+      return true;
+    }
+
+    if (role === "admin") {
+      const [adminBranch] = await db
+        .select()
+        .from(branches)
+        .where(and(eq(branches.id, branchId), eq(branches.adminUserId, userId)));
+      
+      if (adminBranch) return true;
+    }
+
+    const [assignment] = await db
+      .select()
+      .from(userBranches)
+      .where(and(
+        eq(userBranches.userId, userId),
+        eq(userBranches.branchId, branchId)
+      ));
+
+    return !!assignment;
+  }
+
+  async getUserWithBranches(userId: string): Promise<UserWithBranches | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.id, userId));
+    if (!user) return undefined;
+
+    const assignments = await db
+      .select()
+      .from(userBranches)
+      .leftJoin(branches, eq(userBranches.branchId, branches.id))
+      .where(eq(userBranches.userId, userId));
+
+    return {
+      ...user,
+      userBranches: assignments.map(a => ({
+        ...a.user_branches,
+        branch: a.branches || undefined,
+      })),
+    };
   }
 }
 
