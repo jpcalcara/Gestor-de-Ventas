@@ -99,7 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = "/api/login/google";
   };
 
-  const isAdmin = user?.role === "admin";
+  const isAdmin = user?.role === "admin" || user?.role === "sistemas";
   const isVendedor = user?.role === "vendedor";
 
   return (

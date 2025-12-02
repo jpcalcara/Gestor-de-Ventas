@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Building2, ChevronDown, Check, MapPin } from "lucide-react";
+import { Building2, ChevronDown, Check, MapPin, Plus } from "lucide-react";
+import { useLocation } from "wouter";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -38,8 +39,9 @@ interface Branch {
 }
 
 export function BranchSelectorModal() {
-  const { branchId, branchName, selectBranch, isBranchLoading } = useAuth();
+  const { branchId, branchName, selectBranch, isBranchLoading, isAdmin, user } = useAuth();
   const { toast } = useToast();
+  const [location] = useLocation();
   const [isSelecting, setIsSelecting] = useState(false);
 
   const { data: branches = [], isLoading } = useQuery<Branch[]>({
@@ -47,6 +49,9 @@ export function BranchSelectorModal() {
   });
 
   const activeBranches = branches.filter((b) => b.isActive);
+  const canManageBranches = user?.role === "sistemas" || user?.role === "admin";
+  
+  const isOnBranchesPage = location === "/branches";
 
   const handleSelect = async (branch: Branch) => {
     setIsSelecting(true);
@@ -75,19 +80,37 @@ export function BranchSelectorModal() {
     return null;
   }
 
+  if (isOnBranchesPage && canManageBranches) {
+    return null;
+  }
+
   if (activeBranches.length === 0) {
     return (
       <Dialog open={true}>
-        <DialogContent className="max-w-md" hideCloseButton>
+        <DialogContent className="max-w-md" hideCloseButton={!canManageBranches}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Building2 className="h-5 w-5" />
               Sin Sucursales Disponibles
             </DialogTitle>
             <DialogDescription>
-              No hay sucursales activas en el sistema. Contacta al administrador para crear una sucursal.
+              {canManageBranches 
+                ? "No hay sucursales activas en el sistema. Crea una sucursal para comenzar a trabajar."
+                : "No hay sucursales activas en el sistema. Contacta al administrador para crear una sucursal."
+              }
             </DialogDescription>
           </DialogHeader>
+          {canManageBranches && (
+            <div className="flex justify-end mt-4">
+              <Button 
+                onClick={() => window.location.href = "/branches"}
+                data-testid="button-go-to-branches"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Crear Sucursal
+              </Button>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     );
