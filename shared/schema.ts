@@ -202,7 +202,7 @@ export const insertUserSchema = createInsertSchema(users).omit({
   password: z.string().min(6, "La contraseña debe tener al menos 6 caracteres").optional(),
   googleId: z.string().optional(),
   profileImageUrl: z.string().optional(),
-  role: z.enum(["admin", "vendedor"]).default("vendedor"),
+  role: z.enum(["sistemas", "admin", "vendedor"]).default("vendedor"),
 }).refine(
   (data) => data.password || data.googleId,
   {

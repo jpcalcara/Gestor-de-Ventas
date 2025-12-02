@@ -340,6 +340,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lastName: u.lastName,
         phone: u.phone,
         role: u.role,
+        isActive: u.isActive,
         avatar: u.avatar,
         profileImageUrl: u.profileImageUrl,
         createdAt: u.createdAt,
@@ -393,15 +394,48 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/users/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const { firstName, lastName, phone, role, password } = req.body;
+      const targetUser = await storage.getUser(req.params.id);
+      if (!targetUser) {
+        return res.status(404).json({ message: "Usuario no encontrado" });
+      }
+
+      const actorRole = req.session.userRole;
+      const targetRole = targetUser.role;
+
+      if (targetRole === "sistemas" && actorRole !== "sistemas") {
+        return res.status(403).json({ message: "Solo usuarios sistemas pueden modificar otros usuarios sistemas" });
+      }
+
+      if (targetRole === "admin" && actorRole === "admin") {
+        return res.status(403).json({ message: "Administradores no pueden modificar otros administradores" });
+      }
+
+      const { firstName, lastName, phone, role, password, isActive } = req.body;
       const updates: any = {};
       
       if (firstName) updates.firstName = firstName;
       if (lastName) updates.lastName = lastName;
       if (phone !== undefined) updates.phone = phone;
-      if (role && ["admin", "vendedor"].includes(role)) updates.role = role;
+      
+      if (role && ["admin", "vendedor", "sistemas"].includes(role)) {
+        if (role === "sistemas" && actorRole !== "sistemas") {
+          return res.status(403).json({ message: "Solo usuarios sistemas pueden asignar el rol sistemas" });
+        }
+        updates.role = role;
+      }
+      
       if (password && password.length >= 6) {
         updates.password = await hashPassword(password);
+      }
+      
+      if (typeof isActive === "boolean") {
+        if (targetRole === "sistemas" && actorRole !== "sistemas") {
+          return res.status(403).json({ message: "Solo usuarios sistemas pueden habilitar/deshabilitar otros usuarios sistemas" });
+        }
+        if (targetRole === "admin" && actorRole !== "sistemas") {
+          return res.status(403).json({ message: "Solo usuarios sistemas pueden habilitar/deshabilitar administradores" });
+        }
+        updates.isActive = isActive;
       }
 
       const user = await storage.updateUser(req.params.id, updates);
@@ -409,13 +443,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Usuario no encontrado" });
       }
 
+      const actionType = typeof isActive === "boolean" 
+        ? (isActive ? "habilitar_usuario" : "deshabilitar_usuario")
+        : "editar_usuario";
+      
+      const description = typeof isActive === "boolean"
+        ? `Usuario ${isActive ? "habilitado" : "deshabilitado"}: ${user.firstName} ${user.lastName}`
+        : `Usuario editado: ${user.firstName} ${user.lastName}`;
+
       await createAuditLog(
         req.session.userId!,
         req.session.userName!,
-        "editar_usuario",
+        actionType,
         "usuario",
         user.id,
-        `Usuario editado: ${user.firstName} ${user.lastName}`
+        description
       );
 
       res.json({
@@ -425,6 +467,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         lastName: user.lastName,
         phone: user.phone,
         role: user.role,
+        isActive: user.isActive,
       });
     } catch (error: any) {
       res.status(500).json({ message: error.message });

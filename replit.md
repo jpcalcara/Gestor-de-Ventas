@@ -18,15 +18,28 @@ Preferred communication style: Simple, everyday language.
 1. **Email/Password** - Traditional login with bcrypt password hashing
 2. **Google SSO** - Via Replit Auth (OpenID Connect)
 
-### User Roles
-- **admin** - Full system access: products CRUD, sales, reports, user management, audit logs
+### User Roles (Three-Tier System)
+- **sistemas** - Superuser with highest privileges: full system access, can enable/disable users and branches, can view/edit other sistemas users
+- **admin** - Full system access: products CRUD, sales, reports, user management (except sistemas users), audit logs
 - **vendedor** - Limited access: view products, create/edit sales only
+
+### Default Sistemas User
+- Email: `sistemas@jota.com`
+- Password: `Sistemas123!`
+- This user should be used to initially configure the system and its password should be changed after first login
+
+### User Status (isActive)
+- Users can be enabled/disabled via the isActive field
+- Disabled users cannot log in to the system
+- Only sistemas users can enable/disable admin users
+- Admin users can only enable/disable vendedor users
 
 ### Security Features
 - Session-based authentication with PostgreSQL session store
 - Role validation from database on every protected request
+- Active status check on login (disabled users are blocked)
 - SSO users default to "vendedor" role (no privilege escalation)
-- Complete audit trail of all system operations
+- Complete audit trail of all system operations including user enable/disable actions
 
 ## System Architecture
 

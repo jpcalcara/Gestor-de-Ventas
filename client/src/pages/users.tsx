@@ -3,13 +3,14 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Pencil, Trash2, Phone, Mail, User } from "lucide-react";
+import { Plus, Pencil, Trash2, Phone, Mail, User, Power, Shield, ShieldCheck, UserCog } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -45,10 +46,17 @@ interface UserData {
   lastName: string;
   phone?: string | null;
   role: string;
+  isActive: boolean;
   avatar?: string;
   profileImageUrl?: string | null;
   createdAt: string;
 }
+
+const roleLabels: Record<string, { label: string; icon: typeof Shield }> = {
+  sistemas: { label: "Sistemas", icon: UserCog },
+  admin: { label: "Administrador", icon: ShieldCheck },
+  vendedor: { label: "Vendedor", icon: User },
+};
 
 const userFormSchema = z.object({
   email: z.string().email("Email inválido"),
@@ -62,15 +70,22 @@ const userFormSchema = z.object({
 type UserFormValues = z.infer<typeof userFormSchema>;
 
 export default function UsersPage() {
-  const { isAdmin } = useAuth();
+  const { isAdmin, user: currentUser } = useAuth();
   const { toast } = useToast();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
   const [deletingUser, setDeletingUser] = useState<UserData | null>(null);
 
+  const isSistemas = currentUser?.role === "sistemas";
+
   const { data: users = [], isLoading } = useQuery<UserData[]>({
     queryKey: ["/api/users"],
     enabled: isAdmin,
+  });
+
+  const filteredUsers = users.filter((user) => {
+    if (isSistemas) return true;
+    return user.role !== "sistemas";
   });
 
   const form = useForm<UserFormValues>({
@@ -129,6 +144,24 @@ export default function UsersPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/users"] });
       toast({ title: "Usuario eliminado correctamente" });
       setDeletingUser(null);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const toggleActiveMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
+      return await apiRequest("PATCH", `/api/users/${id}`, { isActive });
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/users"] });
+      toast({ 
+        title: variables.isActive ? "Usuario habilitado" : "Usuario deshabilitado",
+        description: variables.isActive 
+          ? "El usuario puede acceder al sistema" 
+          : "El usuario ya no puede acceder al sistema"
+      });
     },
     onError: (error: Error) => {
       toast({ title: "Error", description: error.message, variant: "destructive" });
@@ -349,7 +382,7 @@ export default function UsersPage() {
         <div className="flex justify-center py-8">
           <div className="text-muted-foreground">Cargando usuarios...</div>
         </div>
-      ) : users.length === 0 ? (
+      ) : filteredUsers.length === 0 ? (
         <Card>
           <CardContent className="py-8 text-center text-muted-foreground">
             No hay usuarios registrados.
@@ -357,59 +390,119 @@ export default function UsersPage() {
         </Card>
       ) : (
         <div className="grid gap-4">
-          {users.map((user) => (
-            <Card key={user.id} data-testid={`card-user-${user.id}`}>
-              <CardContent className="py-4">
-                <div className="flex items-center justify-between gap-4">
-                  <div className="flex items-center gap-4">
-                    <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center">
-                      <User className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">
-                          {user.firstName} {user.lastName}
-                        </span>
-                        <Badge variant={user.role === "admin" ? "default" : "secondary"}>
-                          {user.role === "admin" ? "Administrador" : "Vendedor"}
-                        </Badge>
+          {filteredUsers.map((user) => {
+            const roleInfo = roleLabels[user.role] || roleLabels.vendedor;
+            const RoleIcon = roleInfo.icon;
+            const canToggleActive = isSistemas || (currentUser?.role === "admin" && user.role === "vendedor");
+            const canEdit = isSistemas || user.role !== "sistemas";
+            const canDelete = isSistemas || user.role !== "sistemas";
+            const isCurrentUser = currentUser?.id === user.id;
+
+            return (
+              <Card 
+                key={user.id} 
+                data-testid={`card-user-${user.id}`}
+                className={!user.isActive ? "opacity-60" : ""}
+              >
+                <CardContent className="py-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className={`h-10 w-10 rounded-full flex items-center justify-center ${
+                        user.role === "sistemas" 
+                          ? "bg-purple-100 dark:bg-purple-900/30" 
+                          : user.role === "admin" 
+                            ? "bg-primary/10" 
+                            : "bg-muted"
+                      }`}>
+                        <RoleIcon className={`h-5 w-5 ${
+                          user.role === "sistemas" 
+                            ? "text-purple-600 dark:text-purple-400" 
+                            : user.role === "admin" 
+                              ? "text-primary" 
+                              : "text-muted-foreground"
+                        }`} />
                       </div>
-                      <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
-                        <span className="flex items-center gap-1">
-                          <Mail className="h-3 w-3" />
-                          {user.email}
-                        </span>
-                        {user.phone && (
-                          <span className="flex items-center gap-1">
-                            <Phone className="h-3 w-3" />
-                            {user.phone}
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium">
+                            {user.firstName} {user.lastName}
                           </span>
-                        )}
+                          <Badge variant={
+                            user.role === "sistemas" 
+                              ? "default" 
+                              : user.role === "admin" 
+                                ? "secondary" 
+                                : "outline"
+                          } className={user.role === "sistemas" ? "bg-purple-600 hover:bg-purple-700" : ""}>
+                            {roleInfo.label}
+                          </Badge>
+                          {!user.isActive && (
+                            <Badge variant="destructive">
+                              Deshabilitado
+                            </Badge>
+                          )}
+                          {isCurrentUser && (
+                            <Badge variant="outline" className="text-xs">
+                              Tú
+                            </Badge>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
+                          <span className="flex items-center gap-1">
+                            <Mail className="h-3 w-3" />
+                            {user.email}
+                          </span>
+                          {user.phone && (
+                            <span className="flex items-center gap-1">
+                              <Phone className="h-3 w-3" />
+                              {user.phone}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
+                    <div className="flex items-center gap-3">
+                      {canToggleActive && !isCurrentUser && (
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-muted-foreground hidden sm:inline">
+                            {user.isActive ? "Activo" : "Inactivo"}
+                          </span>
+                          <Switch
+                            checked={user.isActive}
+                            onCheckedChange={(checked) => 
+                              toggleActiveMutation.mutate({ id: user.id, isActive: checked })
+                            }
+                            disabled={toggleActiveMutation.isPending}
+                            data-testid={`switch-active-user-${user.id}`}
+                          />
+                        </div>
+                      )}
+                      {canEdit && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => openEditDialog(user)}
+                          data-testid={`button-edit-user-${user.id}`}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                      )}
+                      {canDelete && !isCurrentUser && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => setDeletingUser(user)}
+                          data-testid={`button-delete-user-${user.id}`}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      )}
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => openEditDialog(user)}
-                      data-testid={`button-edit-user-${user.id}`}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setDeletingUser(user)}
-                      data-testid={`button-delete-user-${user.id}`}
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
       )}
 
