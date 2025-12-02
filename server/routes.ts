@@ -677,9 +677,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/branches", requireAuth, async (_req: Request, res: Response) => {
+  app.get("/api/branches", requireAuth, async (req: Request, res: Response) => {
     try {
-      const branchesList = await storage.getBranches();
+      const userId = req.session.userId!;
+      const userRole = req.session.userRole!;
+      
+      const branchesList = await storage.getBranchesForUser(userId, userRole);
       const branchesWithAdmin = await Promise.all(
         branchesList.map(async (branch) => {
           if (branch.adminUserId) {
@@ -861,6 +864,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (!branch.isActive) {
         return res.status(400).json({ message: "La sucursal no está activa" });
+      }
+
+      const canAccess = await storage.canUserAccessBranch(
+        req.session.userId!,
+        branchId,
+        req.session.userRole!
+      );
+
+      if (!canAccess) {
+        return res.status(403).json({ message: "No tiene acceso a esta sucursal" });
       }
 
       req.session.branchId = branchId;
