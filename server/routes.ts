@@ -775,14 +775,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/branches", requireAdmin, async (req: Request, res: Response) => {
     try {
+      // Solo sistemas puede crear sucursales
+      if (req.session.userRole !== "sistemas") {
+        return res.status(403).json({ message: "Solo usuarios sistemas pueden crear sucursales" });
+      }
+
       const result = insertBranchSchema.safeParse(req.body);
       if (!result.success) {
         const validationError = fromError(result.error);
         return res.status(400).json({ message: validationError.message });
-      }
-
-      if (result.data.adminUserId && req.session.userRole !== "sistemas") {
-        return res.status(403).json({ message: "Solo usuarios sistemas pueden asignar un administrador a la sucursal" });
       }
 
       const branch = await storage.createBranch(result.data);
@@ -807,14 +808,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/branches/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
+      // Solo sistemas puede editar sucursales
+      if (req.session.userRole !== "sistemas") {
+        return res.status(403).json({ message: "Solo usuarios sistemas pueden editar sucursales" });
+      }
+
       const result = updateBranchSchema.safeParse(req.body);
       if (!result.success) {
         const validationError = fromError(result.error);
         return res.status(400).json({ message: validationError.message });
-      }
-
-      if (result.data.adminUserId !== undefined && req.session.userRole !== "sistemas") {
-        return res.status(403).json({ message: "Solo usuarios sistemas pueden modificar el administrador de la sucursal" });
       }
 
       const branch = await storage.updateBranch(req.params.id, result.data);
@@ -851,6 +853,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/branches/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
+      // Solo sistemas puede eliminar sucursales
+      if (req.session.userRole !== "sistemas") {
+        return res.status(403).json({ message: "Solo usuarios sistemas pueden eliminar sucursales" });
+      }
+
       const branchToDelete = await storage.getBranch(req.params.id);
       if (!branchToDelete) {
         return res.status(404).json({ message: "Sucursal no encontrada" });

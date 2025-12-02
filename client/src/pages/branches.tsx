@@ -78,6 +78,7 @@ type BranchFormValues = z.infer<typeof branchFormSchema>;
 export default function BranchesPage() {
   const { isAdmin, user } = useAuth();
   const { toast } = useToast();
+  const isSistemas = user?.role === "sistemas";
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingBranch, setEditingBranch] = useState<BranchData | null>(null);
   const [deletingBranch, setDeletingBranch] = useState<BranchData | null>(null);
@@ -237,12 +238,14 @@ export default function BranchesPage() {
             form.reset();
           }
         }}>
-          <DialogTrigger asChild>
-            <Button onClick={openCreateDialog} data-testid="button-add-branch">
-              <Plus className="h-4 w-4 mr-2" />
-              Nueva Sucursal
-            </Button>
-          </DialogTrigger>
+          {isSistemas && (
+            <DialogTrigger asChild>
+              <Button onClick={openCreateDialog} data-testid="button-add-branch">
+                <Plus className="h-4 w-4 mr-2" />
+                Nueva Sucursal
+              </Button>
+            </DialogTrigger>
+          )}
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>
@@ -398,12 +401,16 @@ export default function BranchesPage() {
             <Building2 className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
             <h3 className="text-lg font-medium mb-2">No hay sucursales</h3>
             <p className="text-muted-foreground mb-4">
-              Crea tu primera sucursal para comenzar a operar
+              {isSistemas 
+                ? "Crea tu primera sucursal para comenzar a operar" 
+                : "Aún no hay sucursales creadas en el sistema"}
             </p>
-            <Button onClick={openCreateDialog} data-testid="button-add-first-branch">
-              <Plus className="h-4 w-4 mr-2" />
-              Crear Sucursal
-            </Button>
+            {isSistemas && (
+              <Button onClick={openCreateDialog} data-testid="button-add-first-branch">
+                <Plus className="h-4 w-4 mr-2" />
+                Crear Sucursal
+              </Button>
+            )}
           </CardContent>
         </Card>
       ) : (
@@ -443,24 +450,26 @@ export default function BranchesPage() {
                     </span>
                   </div>
                 )}
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => openEditDialog(branch)}
-                    data-testid={`button-edit-branch-${branch.id}`}
-                  >
-                    <Pencil className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setDeletingBranch(branch)}
-                    data-testid={`button-delete-branch-${branch.id}`}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
-                </div>
+                {isSistemas && (
+                  <div className="flex justify-end gap-2 pt-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => openEditDialog(branch)}
+                      data-testid={`button-edit-branch-${branch.id}`}
+                    >
+                      <Pencil className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setDeletingBranch(branch)}
+                      data-testid={`button-delete-branch-${branch.id}`}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                )}
               </CardContent>
             </Card>
           ))}
