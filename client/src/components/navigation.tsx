@@ -67,13 +67,13 @@ export function Navigation() {
   };
 
   const navItems = [
-    { path: "/", label: "Vender", icon: ShoppingCart, roles: ["admin", "vendedor"] },
-    { path: "/stock", label: "Consultar Stock", icon: Package, roles: ["admin", "vendedor"] },
-    { path: "/reports", label: "Ventas", icon: BarChart3, roles: ["admin", "vendedor"] },
-    { path: "/users", label: "Usuarios", icon: Users, roles: ["admin"] },
-    { path: "/branches", label: "Sucursales", icon: Building2, roles: ["admin"] },
-    { path: "/settings", label: "Configuración", icon: Settings, roles: ["admin"] },
-    { path: "/audit", label: "Auditoría", icon: ClipboardList, roles: ["admin"] },
+    { path: "/", label: "Vender", icon: ShoppingCart, roles: ["sistemas", "admin", "vendedor"] },
+    { path: "/stock", label: "Consultar Stock", icon: Package, roles: ["sistemas", "admin", "vendedor"] },
+    { path: "/reports", label: "Ventas", icon: BarChart3, roles: ["sistemas", "admin", "vendedor"] },
+    { path: "/users", label: "Usuarios", icon: Users, roles: ["sistemas", "admin"] },
+    { path: "/branches", label: "Sucursales", icon: Building2, roles: ["sistemas", "admin"] },
+    { path: "/settings", label: "Configuración", icon: Settings, roles: ["sistemas", "admin"] },
+    { path: "/audit", label: "Auditoría", icon: ClipboardList, roles: ["sistemas", "admin"] },
   ];
 
   const visibleItems = navItems.filter(item => 
@@ -153,7 +153,7 @@ export function Navigation() {
                     <p className="font-medium">{user?.firstName} {user?.lastName}</p>
                     <p className="text-xs text-muted-foreground">{user?.email}</p>
                     <p className="text-xs text-muted-foreground capitalize">
-                      Rol: {user?.role === "admin" ? "Administrador" : "Vendedor"}
+                      Rol: {user?.role === "sistemas" ? "Sistemas" : user?.role === "admin" ? "Administrador" : "Vendedor"}
                     </p>
                   </div>
                 </div>
