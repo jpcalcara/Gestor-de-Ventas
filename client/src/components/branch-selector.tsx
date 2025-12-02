@@ -84,36 +84,9 @@ export function BranchSelectorModal() {
     return null;
   }
 
+  // Si no hay sucursales, no mostrar ningún modal - el usuario puede usar el sistema
   if (activeBranches.length === 0) {
-    return (
-      <Dialog open={true}>
-        <DialogContent className="max-w-md" hideCloseButton={!canManageBranches}>
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Building2 className="h-5 w-5" />
-              Sin Sucursales Disponibles
-            </DialogTitle>
-            <DialogDescription>
-              {canManageBranches 
-                ? "No hay sucursales activas en el sistema. Crea una sucursal para comenzar a trabajar."
-                : "No hay sucursales activas en el sistema. Contacta al administrador para crear una sucursal."
-              }
-            </DialogDescription>
-          </DialogHeader>
-          {canManageBranches && (
-            <div className="flex justify-end mt-4">
-              <Button 
-                onClick={() => window.location.href = "/branches"}
-                data-testid="button-go-to-branches"
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Crear Sucursal
-              </Button>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
-    );
+    return null;
   }
 
   return (
