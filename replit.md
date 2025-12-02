@@ -41,6 +41,27 @@ Preferred communication style: Simple, everyday language.
 - SSO users default to "vendedor" role (no privilege escalation)
 - Complete audit trail of all system operations including user enable/disable actions
 
+## Branch Isolation (Multi-Branch Support)
+
+### Architecture
+- Each branch operates as an isolated unit with its own products, stock, and sales
+- Products table has branchId column (NOT NULL FK to branches)
+- All product and sale operations require and validate session.branchId
+- Storage layer enforces branch isolation at query level (not just route level)
+
+### Branch-Scoped Storage Methods
+All data access goes through branch-scoped methods:
+- **Products**: getProducts(branchId), getProductByBranch(id, branchId), createProduct(+branchId), updateProduct(+branchId), deleteProduct(+branchId)
+- **Sales**: getSalesByBranch(branchId), getSaleByBranch(id, branchId), createSale(+branchId), updateSale(+branchId), deleteSale(+branchId)
+- **Sale Orders**: getSaleOrdersByBranch(branchId), createSaleOrderForBranch(+branchId)
+- **Audit Logs**: getAuditLogsByBranch(branchId)
+
+### Security Enforcement
+- Legacy branch-agnostic methods (getProduct, getSale) have been removed
+- Cross-branch access attempts return 404 (not found in this branch)
+- Stock updates validate product belongs to current branch
+- Sale order creation validates all line items belong to session branch
+
 ## System Architecture
 
 ### Frontend Architecture

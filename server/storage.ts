@@ -39,22 +39,17 @@ import { eq, desc, sql, and } from "drizzle-orm";
 
 export interface IStorage {
   getProducts(branchId?: string): Promise<Product[]>;
-  getProduct(id: string): Promise<Product | undefined>;
   getProductByBranch(id: string, branchId: string): Promise<Product | undefined>;
   createProduct(product: InsertProduct & { branchId: string }): Promise<Product>;
   updateProduct(id: string, product: InsertProduct, branchId: string): Promise<Product | undefined>;
   deleteProduct(id: string, branchId: string): Promise<boolean>;
   
-  getSales(): Promise<SaleWithProduct[]>;
-  getSale(id: string): Promise<Sale | undefined>;
-  createSale(sale: InsertSale & { userId: string }): Promise<Sale>;
-  updateSale(id: string, updates: UpdateSale): Promise<Sale | undefined>;
-  deleteSale(id: string): Promise<boolean>;
+  getSaleByBranch(id: string, branchId: string): Promise<Sale | undefined>;
+  createSale(sale: InsertSale & { userId: string; branchId: string }): Promise<Sale>;
+  updateSale(id: string, updates: UpdateSale, branchId: string): Promise<Sale | undefined>;
+  deleteSale(id: string, branchId: string): Promise<boolean>;
   
-  getSaleOrders(): Promise<SaleOrderWithItems[]>;
-  createSaleOrder(order: InsertSaleOrder & { userId: string }): Promise<SaleOrder>;
-  
-  updateProductStock(productId: string, quantity: number): Promise<Product | undefined>;
+  updateProductStock(productId: string, branchId: string, quantity: number): Promise<Product | undefined>;
   
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
@@ -101,11 +96,6 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(products);
   }
 
-  async getProduct(id: string): Promise<Product | undefined> {
-    const [product] = await db.select().from(products).where(eq(products.id, id));
-    return product || undefined;
-  }
-
   async getProductByBranch(id: string, branchId: string): Promise<Product | undefined> {
     const [product] = await db.select().from(products).where(
       and(eq(products.id, id), eq(products.branchId, branchId))
@@ -144,35 +134,25 @@ export class DatabaseStorage implements IStorage {
     return result.rowCount !== null && result.rowCount > 0;
   }
 
-  async getSales(): Promise<SaleWithProduct[]> {
-    const result = await db
-      .select()
-      .from(sales)
-      .leftJoin(products, eq(sales.productId, products.id))
-      .orderBy(desc(sales.createdAt));
-
-    return result
-      .filter(row => row.products !== null)
-      .map(row => ({
-        ...row.sales,
-        product: row.products!,
-      }));
-  }
-
-  async getSale(id: string): Promise<Sale | undefined> {
-    const [sale] = await db.select().from(sales).where(eq(sales.id, id));
+  async getSaleByBranch(id: string, branchId: string): Promise<Sale | undefined> {
+    const [sale] = await db.select().from(sales).where(
+      and(eq(sales.id, id), eq(sales.branchId, branchId))
+    );
     return sale || undefined;
   }
 
-  async createSale(insertSale: InsertSale & { userId: string }): Promise<Sale> {
+  async createSale(insertSale: InsertSale & { userId: string; branchId: string }): Promise<Sale> {
     return await db.transaction(async (tx) => {
       const [product] = await tx
         .select()
         .from(products)
-        .where(eq(products.id, insertSale.productId));
+        .where(and(
+          eq(products.id, insertSale.productId),
+          eq(products.branchId, insertSale.branchId)
+        ));
 
       if (!product) {
-        throw new Error("Producto no encontrado");
+        throw new Error("Producto no encontrado en esta sucursal");
       }
 
       const quantity = Number(insertSale.quantity);
@@ -185,6 +165,7 @@ export class DatabaseStorage implements IStorage {
         .insert(sales)
         .values({
           productId: insertSale.productId,
+          branchId: insertSale.branchId,
           userId: insertSale.userId,
           quantity: String(quantity),
           unitType: insertSale.unitType || product.unitType,
@@ -196,7 +177,10 @@ export class DatabaseStorage implements IStorage {
       const [updatedProduct] = await tx
         .update(products)
         .set({ stock: sql`stock - ${quantity}` })
-        .where(eq(products.id, insertSale.productId))
+        .where(and(
+          eq(products.id, insertSale.productId),
+          eq(products.branchId, insertSale.branchId)
+        ))
         .returning();
 
       if (!updatedProduct || Number(updatedProduct.stock) < 0) {
@@ -207,108 +191,14 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async getSaleOrders(): Promise<SaleOrderWithItems[]> {
-    const orders = await db
-      .select()
-      .from(saleOrders)
-      .leftJoin(users, eq(saleOrders.userId, users.id))
-      .orderBy(desc(saleOrders.createdAt));
-
-    const result: SaleOrderWithItems[] = [];
-    
-    for (const row of orders) {
-      const orderSales = await db
-        .select()
-        .from(sales)
-        .leftJoin(products, eq(sales.productId, products.id))
-        .where(eq(sales.orderId, row.sale_orders.id));
-
-      result.push({
-        ...row.sale_orders,
-        user: row.users || undefined,
-        items: orderSales
-          .filter(s => s.products !== null)
-          .map(s => ({
-            ...s.sales,
-            product: s.products!,
-          })),
-      });
-    }
-
-    return result;
-  }
-
-  async createSaleOrder(order: InsertSaleOrder & { userId: string }): Promise<SaleOrder> {
-    return await db.transaction(async (tx) => {
-      let totalAmount = 0;
-      
-      for (const item of order.items) {
-        const [product] = await tx
-          .select()
-          .from(products)
-          .where(eq(products.id, item.productId));
-
-        if (!product) {
-          throw new Error(`Producto no encontrado: ${item.productTitle}`);
-        }
-
-        const quantity = Number(item.quantity);
-        if (Number(product.stock) < quantity) {
-          throw new Error(`Stock insuficiente para ${product.title}. Disponible: ${product.stock}`);
-        }
-
-        totalAmount += item.unitPrice * quantity;
-      }
-
-      const changeAmount = order.paymentMethod === "efectivo" && order.paidAmount 
-        ? order.paidAmount - totalAmount 
-        : null;
-
-      const [saleOrder] = await tx
-        .insert(saleOrders)
-        .values({
-          userId: order.userId,
-          paymentMethod: order.paymentMethod,
-          paidAmount: order.paidAmount?.toString() || null,
-          changeAmount: changeAmount?.toFixed(2) || null,
-          totalAmount: totalAmount.toFixed(2),
-        })
-        .returning();
-
-      for (const item of order.items) {
-        const quantity = Number(item.quantity);
-        const totalPrice = (item.unitPrice * quantity).toFixed(2);
-
-        await tx
-          .insert(sales)
-          .values({
-            orderId: saleOrder.id,
-            productId: item.productId,
-            userId: order.userId,
-            quantity: String(quantity),
-            unitType: item.unitType,
-            unitPrice: item.unitPrice.toFixed(2),
-            totalPrice,
-          });
-
-        await tx
-          .update(products)
-          .set({ stock: sql`stock - ${quantity}` })
-          .where(eq(products.id, item.productId));
-      }
-
-      return saleOrder;
-    });
-  }
-
-  async updateSale(id: string, updates: UpdateSale): Promise<Sale | undefined> {
+  async updateSale(id: string, updates: UpdateSale, branchId: string): Promise<Sale | undefined> {
     updateSaleSchema.parse(updates);
     
     return await db.transaction(async (tx) => {
       const [currentSale] = await tx
         .select()
         .from(sales)
-        .where(eq(sales.id, id))
+        .where(and(eq(sales.id, id), eq(sales.branchId, branchId)))
         .for('update');
 
       if (!currentSale) return undefined;
@@ -323,7 +213,7 @@ export class DatabaseStorage implements IStorage {
             isEdited: true,
             updatedAt: new Date(),
           })
-          .where(eq(sales.id, id))
+          .where(and(eq(sales.id, id), eq(sales.branchId, branchId)))
           .returning();
         return updated || undefined;
       }
@@ -331,10 +221,10 @@ export class DatabaseStorage implements IStorage {
       const [product] = await tx
         .select()
         .from(products)
-        .where(eq(products.id, currentSale.productId))
+        .where(and(eq(products.id, currentSale.productId), eq(products.branchId, branchId)))
         .for('update');
 
-      if (!product) throw new Error("Producto no encontrado");
+      if (!product) throw new Error("Producto no encontrado en esta sucursal");
 
       const delta = originalQty - nextQty;
       const currentStock = Number(product.stock);
@@ -350,7 +240,7 @@ export class DatabaseStorage implements IStorage {
       const [updatedProduct] = await tx
         .update(products)
         .set({ stock: sql`stock + ${delta}` })
-        .where(eq(products.id, currentSale.productId))
+        .where(and(eq(products.id, currentSale.productId), eq(products.branchId, branchId)))
         .returning();
 
       if (!updatedProduct) {
@@ -365,7 +255,7 @@ export class DatabaseStorage implements IStorage {
           isEdited: true,
           updatedAt: new Date(),
         })
-        .where(eq(sales.id, id))
+        .where(and(eq(sales.id, id), eq(sales.branchId, branchId)))
         .returning();
 
       if (!updated) {
@@ -376,17 +266,19 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async deleteSale(id: string): Promise<boolean> {
-    const result = await db.delete(sales).where(eq(sales.id, id));
+  async deleteSale(id: string, branchId: string): Promise<boolean> {
+    const result = await db.delete(sales).where(
+      and(eq(sales.id, id), eq(sales.branchId, branchId))
+    );
     return result.rowCount !== null && result.rowCount > 0;
   }
 
-  async updateProductStock(productId: string, quantityChange: number): Promise<Product | undefined> {
+  async updateProductStock(productId: string, branchId: string, quantityChange: number): Promise<Product | undefined> {
     return await db.transaction(async (tx) => {
       const [updatedProduct] = await tx
         .update(products)
         .set({ stock: sql`stock + ${quantityChange}` })
-        .where(eq(products.id, productId))
+        .where(and(eq(products.id, productId), eq(products.branchId, branchId)))
         .returning();
 
       if (!updatedProduct || updatedProduct.stock < 0) {

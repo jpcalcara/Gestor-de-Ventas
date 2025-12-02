@@ -193,9 +193,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/sales", requireAuth, async (_req: Request, res: Response) => {
+  app.get("/api/sales", requireAuth, async (req: Request, res: Response) => {
     try {
-      const sales = await storage.getSales();
+      const branchId = req.session.branchId;
+      if (!branchId) {
+        return res.status(400).json({ message: "Debe seleccionar una sucursal primero" });
+      }
+      const sales = await storage.getSalesByBranch(branchId);
       res.json(sales);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -204,9 +208,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/sales/:id", requireAuth, async (req: Request, res: Response) => {
     try {
-      const sale = await storage.getSale(req.params.id);
+      const branchId = req.session.branchId;
+      if (!branchId) {
+        return res.status(400).json({ message: "Debe seleccionar una sucursal primero" });
+      }
+      const sale = await storage.getSaleByBranch(req.params.id, branchId);
       if (!sale) {
-        return res.status(404).json({ message: "Venta no encontrada" });
+        return res.status(404).json({ message: "Venta no encontrada en esta sucursal" });
       }
       res.json(sale);
     } catch (error: any) {
@@ -216,25 +224,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/sales", requireAuth, async (req: Request, res: Response) => {
     try {
+      const branchId = req.session.branchId;
+      if (!branchId) {
+        return res.status(400).json({ message: "Debe seleccionar una sucursal primero" });
+      }
+      
       const result = insertSaleSchema.safeParse(req.body);
       if (!result.success) {
         const validationError = fromError(result.error);
         return res.status(400).json({ message: validationError.message });
       }
 
+      const product = await storage.getProductByBranch(result.data.productId, branchId);
+      if (!product) {
+        return res.status(400).json({ message: "El producto no existe en esta sucursal" });
+      }
+
       const sale = await storage.createSale({
         ...result.data,
         userId: req.session.userId!,
+        branchId,
       });
       
-      const product = await storage.getProduct(result.data.productId);
       await createAuditLog(
         req.session.userId!,
         req.session.userName!,
         "registrar_venta",
         "venta",
         sale.id,
-        `Venta registrada: ${result.data.quantity} unidades de ${product?.title || 'Producto'}`
+        `Venta registrada: ${result.data.quantity} unidades de ${product.title}`,
+        branchId
       );
       
       res.status(201).json(sale);
@@ -245,22 +264,27 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.patch("/api/sales/:id", requireAuth, async (req: Request, res: Response) => {
     try {
+      const branchId = req.session.branchId;
+      if (!branchId) {
+        return res.status(400).json({ message: "Debe seleccionar una sucursal primero" });
+      }
+      
       const result = updateSaleSchema.safeParse(req.body);
       if (!result.success) {
         const validationError = fromError(result.error);
         return res.status(400).json({ message: validationError.message });
       }
 
-      const currentSale = await storage.getSale(req.params.id);
+      const currentSale = await storage.getSaleByBranch(req.params.id, branchId);
       if (!currentSale) {
-        return res.status(404).json({ message: "Venta no encontrada" });
+        return res.status(404).json({ message: "Venta no encontrada en esta sucursal" });
       }
 
-      if (req.session.userRole !== "admin" && currentSale.userId !== req.session.userId) {
+      if (req.session.userRole !== "admin" && req.session.userRole !== "sistemas" && currentSale.userId !== req.session.userId) {
         return res.status(403).json({ message: "No tienes permiso para editar esta venta" });
       }
 
-      const sale = await storage.updateSale(req.params.id, result.data);
+      const sale = await storage.updateSale(req.params.id, result.data, branchId);
       if (!sale) {
         return res.status(404).json({ message: "Venta no encontrada" });
       }
@@ -271,7 +295,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "editar_venta",
         "venta",
         sale.id,
-        `Venta editada: cantidad cambiada a ${result.data.quantity}`
+        `Venta editada: cantidad cambiada a ${result.data.quantity}`,
+        branchId
       );
       
       res.json(sale);
@@ -282,14 +307,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.delete("/api/sales/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const sale = await storage.getSale(req.params.id);
+      const branchId = req.session.branchId;
+      if (!branchId) {
+        return res.status(400).json({ message: "Debe seleccionar una sucursal primero" });
+      }
+      
+      const sale = await storage.getSaleByBranch(req.params.id, branchId);
       if (!sale) {
-        return res.status(404).json({ message: "Venta no encontrada" });
+        return res.status(404).json({ message: "Venta no encontrada en esta sucursal" });
       }
 
-      await storage.updateProductStock(sale.productId, Number(sale.quantity));
+      await storage.updateProductStock(sale.productId, branchId, Number(sale.quantity));
       
-      const deleted = await storage.deleteSale(req.params.id);
+      const deleted = await storage.deleteSale(req.params.id, branchId);
       if (!deleted) {
         return res.status(500).json({ message: "Error al eliminar la venta" });
       }
@@ -300,7 +330,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "eliminar_venta",
         "venta",
         req.params.id,
-        `Venta eliminada, stock restaurado: ${sale.quantity} unidades`
+        `Venta eliminada, stock restaurado: ${sale.quantity} unidades`,
+        branchId
       );
       
       res.json({ success: true, message: "Venta eliminada y stock restaurado" });
@@ -309,9 +340,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/sale-orders", requireAuth, async (_req: Request, res: Response) => {
+  app.get("/api/sale-orders", requireAuth, async (req: Request, res: Response) => {
     try {
-      const orders = await storage.getSaleOrders();
+      const branchId = req.session.branchId;
+      if (!branchId) {
+        return res.status(400).json({ message: "Debe seleccionar una sucursal primero" });
+      }
+      const orders = await storage.getSaleOrdersByBranch(branchId);
       res.json(orders);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -320,6 +355,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/sale-orders", requireAuth, async (req: Request, res: Response) => {
     try {
+      const branchId = req.session.branchId;
+      if (!branchId) {
+        return res.status(400).json({ message: "Debe seleccionar una sucursal primero" });
+      }
+      
       const { insertSaleOrderSchema } = await import("@shared/schema");
       const result = insertSaleOrderSchema.safeParse(req.body);
       if (!result.success) {
@@ -327,9 +367,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: validationError.message });
       }
 
-      const order = await storage.createSaleOrder({
+      for (const item of result.data.items) {
+        const product = await storage.getProductByBranch(item.productId, branchId);
+        if (!product) {
+          return res.status(400).json({ message: `El producto ${item.productTitle} no existe en esta sucursal` });
+        }
+      }
+
+      const order = await storage.createSaleOrderForBranch({
         ...result.data,
         userId: req.session.userId!,
+        branchId,
       });
 
       const itemsDescription = result.data.items
@@ -342,7 +390,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "registrar_venta",
         "orden_venta",
         order.id,
-        `Orden de venta registrada: ${itemsDescription}. Método: ${result.data.paymentMethod}. Total: ${order.totalAmount}`
+        `Orden de venta registrada: ${itemsDescription}. Método: ${result.data.paymentMethod}. Total: ${order.totalAmount}`,
+        branchId
       );
       
       res.status(201).json(order);
@@ -809,6 +858,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/branches/:branchId/stocks", requireAuth, async (req: Request, res: Response) => {
     try {
+      if (req.params.branchId !== req.session.branchId) {
+        return res.status(403).json({ message: "No tiene acceso a esta sucursal" });
+      }
       const stocks = await storage.getBranchStocks(req.params.branchId);
       res.json(stocks);
     } catch (error: any) {
@@ -818,6 +870,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/branches/:branchId/stocks", requireAdmin, async (req: Request, res: Response) => {
     try {
+      if (req.params.branchId !== req.session.branchId) {
+        return res.status(403).json({ message: "No tiene acceso a esta sucursal" });
+      }
+      
       const result = insertBranchStockSchema.safeParse({
         ...req.body,
         branchId: req.params.branchId,
@@ -847,6 +903,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/branches/:branchId/sale-orders", requireAuth, async (req: Request, res: Response) => {
     try {
+      if (req.params.branchId !== req.session.branchId) {
+        return res.status(403).json({ message: "No tiene acceso a esta sucursal" });
+      }
       const orders = await storage.getSaleOrdersByBranch(req.params.branchId);
       res.json(orders);
     } catch (error: any) {
@@ -856,6 +915,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/branches/:branchId/sale-orders", requireAuth, async (req: Request, res: Response) => {
     try {
+      if (req.params.branchId !== req.session.branchId) {
+        return res.status(403).json({ message: "No tiene acceso a esta sucursal" });
+      }
+      
       const order = await storage.createSaleOrderForBranch({
         ...req.body,
         userId: req.session.userId!,
@@ -880,6 +943,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/branches/:branchId/audit-logs", requireAdmin, async (req: Request, res: Response) => {
     try {
+      if (req.params.branchId !== req.session.branchId) {
+        return res.status(403).json({ message: "No tiene acceso a esta sucursal" });
+      }
       const logs = await storage.getAuditLogsByBranch(req.params.branchId);
       res.json(logs);
     } catch (error: any) {
