@@ -783,12 +783,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/branches/:id/product-count", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const products = await storage.getProducts(req.params.id);
+      res.json({ count: products.length });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.delete("/api/branches/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
       const branchToDelete = await storage.getBranch(req.params.id);
+      if (!branchToDelete) {
+        return res.status(404).json({ message: "Sucursal no encontrada" });
+      }
+
+      const products = await storage.getProducts(req.params.id);
+      const productCount = products.length;
+      const forceDelete = req.query.force === "true";
+
+      if (productCount > 0 && !forceDelete) {
+        return res.status(400).json({ 
+          message: `La sucursal tiene ${productCount} producto(s). Use force=true para eliminar todo.`,
+          productCount,
+          requiresConfirmation: true
+        });
+      }
+
+      if (productCount > 0) {
+        for (const product of products) {
+          await storage.deleteProduct(product.id, req.params.id);
+        }
+        
+        await createAuditLog(
+          req.session.userId!,
+          req.session.userName!,
+          "eliminar_productos_sucursal",
+          "productos",
+          req.params.id,
+          `Eliminados ${productCount} productos de sucursal: ${branchToDelete.name}`,
+          req.params.id
+        );
+      }
+
       const deleted = await storage.deleteBranch(req.params.id);
       if (!deleted) {
-        return res.status(404).json({ message: "Sucursal no encontrada" });
+        return res.status(500).json({ message: "Error al eliminar la sucursal" });
       }
       
       await createAuditLog(
@@ -797,10 +838,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         "eliminar_sucursal",
         "sucursal",
         req.params.id,
-        `Sucursal eliminada: ${branchToDelete?.name}`
+        `Sucursal eliminada: ${branchToDelete.name}${productCount > 0 ? ` (con ${productCount} productos)` : ""}`
       );
 
-      res.json({ success: true });
+      res.json({ success: true, deletedProducts: productCount });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
