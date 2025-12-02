@@ -123,10 +123,29 @@ export const branchStocks = pgTable("branch_stocks", {
   lowStockThreshold: integer("low_stock_threshold").default(10),
 });
 
+export const userBranches = pgTable("user_branches", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  branchId: varchar("branch_id").notNull().references(() => branches.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const usersRelations = relations(users, ({ many }) => ({
   sales: many(sales),
   auditLogs: many(auditLogs),
   passwordResetTokens: many(passwordResetTokens),
+  userBranches: many(userBranches),
+}));
+
+export const userBranchesRelations = relations(userBranches, ({ one }) => ({
+  user: one(users, {
+    fields: [userBranches.userId],
+    references: [users.id],
+  }),
+  branch: one(branches, {
+    fields: [userBranches.branchId],
+    references: [branches.id],
+  }),
 }));
 
 export const passwordResetTokensRelations = relations(passwordResetTokens, ({ one }) => ({
@@ -183,6 +202,7 @@ export const branchesRelations = relations(branches, ({ many }) => ({
   saleOrders: many(saleOrders),
   sales: many(sales),
   auditLogs: many(auditLogs),
+  userBranches: many(userBranches),
 }));
 
 export const branchStocksRelations = relations(branchStocks, ({ one }) => ({
@@ -363,4 +383,24 @@ export type InsertBranchStock = z.infer<typeof insertBranchStockSchema>;
 
 export type BranchStockWithProduct = BranchStock & {
   product: Product;
+};
+
+export const insertUserBranchSchema = createInsertSchema(userBranches).omit({
+  id: true,
+  createdAt: true,
+}).extend({
+  userId: z.string().min(1, "El usuario es requerido"),
+  branchId: z.string().min(1, "La sucursal es requerida"),
+});
+
+export const updateUserBranchesSchema = z.object({
+  branchIds: z.array(z.string()).min(0),
+});
+
+export type UserBranch = typeof userBranches.$inferSelect;
+export type InsertUserBranch = z.infer<typeof insertUserBranchSchema>;
+export type UpdateUserBranches = z.infer<typeof updateUserBranchesSchema>;
+
+export type UserWithBranches = User & {
+  userBranches?: (UserBranch & { branch?: Branch })[];
 };
