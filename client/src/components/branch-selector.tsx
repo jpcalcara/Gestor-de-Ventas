@@ -131,7 +131,7 @@ export function BranchSelectorModal() {
 }
 
 export function BranchSwitcher() {
-  const { branchId, branchName, selectBranch } = useAuth();
+  const { branchId, branchName, selectBranch, user } = useAuth();
   const { toast } = useToast();
   const [confirmBranch, setConfirmBranch] = useState<Branch | null>(null);
   const [isSwitching, setIsSwitching] = useState(false);
@@ -142,6 +142,7 @@ export function BranchSwitcher() {
 
   const activeBranches = branches.filter((b) => b.isActive);
   const currentBranch = branches.find((b) => b.id === branchId);
+  const isAdminOrVendedor = user?.role === "admin" || user?.role === "vendedor";
 
   const handleConfirmSwitch = async () => {
     if (!confirmBranch) return;
@@ -165,7 +166,8 @@ export function BranchSwitcher() {
     }
   };
 
-  if (!branchId || activeBranches.length <= 1) {
+  // Mostrar solo texto si no hay rama seleccionada o si es sistemas sin múltiples sucursales
+  if (!branchId || (!isAdminOrVendedor && activeBranches.length <= 1)) {
     return currentBranch ? (
       <div className="flex items-center gap-2 px-2 py-1 text-sm text-muted-foreground" data-testid="text-current-branch">
         <Building2 className="h-4 w-4" />
@@ -183,9 +185,10 @@ export function BranchSwitcher() {
             <Building2 className="h-4 w-4" />
             <span className="hidden sm:inline">{currentBranch?.name || "Sucursal"}</span>
             <span className="sm:hidden">Suc. {currentBranch?.number}</span>
-            <ChevronDown className="h-3 w-3" />
+            {activeBranches.length > 1 && <ChevronDown className="h-3 w-3" />}
           </Button>
         </DropdownMenuTrigger>
+        {activeBranches.length > 1 && (
         <DropdownMenuContent align="end" className="w-64">
           {activeBranches.map((branch) => (
             <DropdownMenuItem
@@ -204,6 +207,7 @@ export function BranchSwitcher() {
             </DropdownMenuItem>
           ))}
         </DropdownMenuContent>
+        )}
       </DropdownMenu>
 
       <AlertDialog open={!!confirmBranch} onOpenChange={(open) => !open && setConfirmBranch(null)}>
