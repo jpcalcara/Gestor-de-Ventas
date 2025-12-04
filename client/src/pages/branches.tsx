@@ -66,7 +66,7 @@ interface BranchData {
 }
 
 const branchFormSchema = z.object({
-  businessId: z.string().min(1, "El negocio es requerido"),
+  businessId: z.string().min(1, "El negocio es requerido").optional().or(z.literal("")),
   number: z.coerce.number().min(1, "El número es requerido"),
   name: z.string().min(1, "El nombre es requerido"),
   address: z.string().min(1, "El domicilio es requerido"),
