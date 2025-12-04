@@ -444,6 +444,28 @@ export class DatabaseStorage implements IStorage {
     );
   }
 
+  async createBusiness(insertBusiness: InsertBusiness & { adminUserId: string }): Promise<Business> {
+    const [business] = await db
+      .insert(businesses)
+      .values(insertBusiness)
+      .returning();
+    return business;
+  }
+
+  async updateBusiness(id: string, updates: Partial<InsertBusiness>): Promise<Business | undefined> {
+    const [updated] = await db
+      .update(businesses)
+      .set({ ...updates, updatedAt: new Date() })
+      .where(eq(businesses.id, id))
+      .returning();
+    return updated || undefined;
+  }
+
+  async deleteBusiness(id: string): Promise<boolean> {
+    const result = await db.delete(businesses).where(eq(businesses.id, id));
+    return result.rowCount !== null && result.rowCount > 0;
+  }
+
   async getBranches(): Promise<Branch[]> {
     return await db.select().from(branches).orderBy(branches.number);
   }

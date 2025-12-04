@@ -696,6 +696,104 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.use("/uploads", (await import("express")).default.static(uploadsDir));
 
+  app.get("/api/businesses", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const businesses = await storage.getBusinesses();
+      res.json(businesses);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/businesses", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      if (req.session.userRole !== "sistemas") {
+        return res.status(403).json({ message: "Solo usuarios sistemas pueden crear negocios" });
+      }
+
+      const { insertBusinessSchema } = await import("@shared/schema");
+      const result = insertBusinessSchema.safeParse(req.body);
+      if (!result.success) {
+        const validationError = fromError(result.error);
+        return res.status(400).json({ message: validationError.message });
+      }
+
+      const business = await storage.createBusiness({ ...result.data, adminUserId: req.session.userId! });
+      
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "crear_negocio",
+        "negocio",
+        business.id,
+        `Negocio creado: ${business.razonSocial}`
+      );
+
+      res.status(201).json(business);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/businesses/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      if (req.session.userRole !== "sistemas") {
+        return res.status(403).json({ message: "Solo usuarios sistemas pueden editar negocios" });
+      }
+
+      const { updateBusinessSchema } = await import("@shared/schema");
+      const result = updateBusinessSchema.safeParse(req.body);
+      if (!result.success) {
+        const validationError = fromError(result.error);
+        return res.status(400).json({ message: validationError.message });
+      }
+
+      const business = await storage.updateBusiness(req.params.id, result.data);
+      if (!business) {
+        return res.status(404).json({ message: "Negocio no encontrado" });
+      }
+
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "editar_negocio",
+        "negocio",
+        req.params.id,
+        `Negocio actualizado: ${business.razonSocial}`
+      );
+
+      res.json(business);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/businesses/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      if (req.session.userRole !== "sistemas") {
+        return res.status(403).json({ message: "Solo usuarios sistemas pueden eliminar negocios" });
+      }
+
+      const deleted = await storage.deleteBusiness(req.params.id);
+      if (!deleted) {
+        return res.status(500).json({ message: "Error al eliminar el negocio" });
+      }
+
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "eliminar_negocio",
+        "negocio",
+        req.params.id,
+        "Negocio eliminado"
+      );
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.post("/api/upload/profile", requireAuth, upload.single("image"), async (req: Request, res: Response) => {
     try {
       if (!req.file) {
@@ -995,11 +1093,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       req.session.businessId = businessId;
-      req.session.businessName = business.name;
+      req.session.businessName = business.razonSocial;
       req.session.branchId = undefined;
       req.session.branchName = undefined;
 
-      res.json({ businessId, businessName: business.name });
+      res.json({ businessId, businessName: business.razonSocial });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -1016,7 +1114,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const businesses = await storage.getBusinessesForUser(req.session.userId!);
         if (businesses.length > 0) {
           businessId = businesses[0].id;
-          businessName = businesses[0].name;
+          businessName = businesses[0].razonSocial;
           req.session.businessId = businessId;
           req.session.businessName = businessName;
         }

@@ -10,6 +10,7 @@ import ProductsPage from "@/pages/products";
 import ProductDetailPage from "@/pages/product-detail";
 import SalesPage from "@/pages/sales";
 import ReportsPage from "@/pages/reports";
+import BusinessesPage from "@/pages/businesses";
 import UsersPage from "@/pages/users";
 import BranchesPage from "@/pages/branches";
 import SettingsPage from "@/pages/settings";
@@ -95,6 +96,9 @@ function Router() {
       </Route>
       <Route path="/users">
         <AdminRoute component={UsersPage} />
+      </Route>
+      <Route path="/businesses">
+        <AdminRoute component={BusinessesPage} />
       </Route>
       <Route path="/branches">
         <AdminRoute component={BranchesPage} />

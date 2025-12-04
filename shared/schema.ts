@@ -106,7 +106,11 @@ export const companySettings = pgTable("company_settings", {
 
 export const businesses = pgTable("businesses", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  name: text("name").notNull(),
+  razonSocial: text("razon_social").notNull().unique(),
+  cuit: text("cuit").unique(),
+  encargado: text("encargado"),
+  telefono: text("telefono"),
+  mail: text("mail"),
   adminUserId: varchar("admin_user_id").notNull().references(() => users.id),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
@@ -346,10 +350,25 @@ export const insertBusinessSchema = createInsertSchema(businesses).omit({
   createdAt: true,
   updatedAt: true,
 }).extend({
-  name: z.string().min(1, "El nombre del negocio es requerido"),
+  razonSocial: z.string().min(1, "La razón social es requerida"),
+  cuit: z.string().optional().nullable(),
+  encargado: z.string().optional().nullable(),
+  telefono: z.string().optional().nullable(),
+  mail: z.string().email("Email inválido").optional().nullable(),
   adminUserId: z.string().min(1, "El administrador es requerido"),
   isActive: z.boolean().default(true),
 });
+
+export const updateBusinessSchema = z.object({
+  razonSocial: z.string().min(1, "La razón social es requerida").optional(),
+  cuit: z.string().optional().nullable(),
+  encargado: z.string().optional().nullable(),
+  telefono: z.string().optional().nullable(),
+  mail: z.string().email("Email inválido").optional().nullable(),
+  isActive: z.boolean().optional(),
+});
+
+export type UpdateBusiness = z.infer<typeof updateBusinessSchema>;
 
 export const insertBranchSchema = createInsertSchema(branches).omit({
   id: true,

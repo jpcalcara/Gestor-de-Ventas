@@ -71,6 +71,7 @@ export function Navigation() {
     { path: "/stock", label: "Consultar Stock", icon: Package, roles: ["sistemas", "admin", "vendedor"] },
     { path: "/reports", label: "Ventas", icon: BarChart3, roles: ["sistemas", "admin", "vendedor"] },
     { path: "/users", label: "Usuarios", icon: Users, roles: ["sistemas", "admin"] },
+    { path: "/businesses", label: "Negocio", icon: Building2, roles: ["sistemas", "admin"] },
     { path: "/branches", label: "Sucursales", icon: Building2, roles: ["sistemas", "admin"] },
     { path: "/settings", label: "Configuración", icon: Settings, roles: ["sistemas", "admin"] },
     { path: "/audit", label: "Auditoría", icon: ClipboardList, roles: ["sistemas", "admin"] },
