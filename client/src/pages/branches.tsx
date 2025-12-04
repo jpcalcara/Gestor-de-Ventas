@@ -66,6 +66,7 @@ interface BranchData {
 }
 
 const branchFormSchema = z.object({
+  businessId: z.string().min(1, "El negocio es requerido"),
   number: z.coerce.number().min(1, "El número es requerido"),
   name: z.string().min(1, "El nombre es requerido"),
   address: z.string().min(1, "El domicilio es requerido"),
@@ -74,6 +75,12 @@ const branchFormSchema = z.object({
 });
 
 type BranchFormValues = z.infer<typeof branchFormSchema>;
+
+interface Business {
+  id: string;
+  name: string;
+  isActive: boolean;
+}
 
 export default function BranchesPage() {
   const { isAdmin, user } = useAuth();
@@ -90,6 +97,11 @@ export default function BranchesPage() {
     enabled: isAdmin,
   });
 
+  const { data: businesses = [] } = useQuery<Business[]>({
+    queryKey: ["/api/businesses"],
+    enabled: isAdmin && isSistemas,
+  });
+
   const { data: adminUsers = [] } = useQuery<UserData[]>({
     queryKey: ["/api/users", "admins"],
     queryFn: async () => {
@@ -104,6 +116,7 @@ export default function BranchesPage() {
   const form = useForm<BranchFormValues>({
     resolver: zodResolver(branchFormSchema),
     defaultValues: {
+      businessId: "",
       number: 1,
       name: "",
       address: "",
@@ -201,6 +214,7 @@ export default function BranchesPage() {
       ? Math.max(...branches.map(b => b.number)) + 1 
       : 1;
     form.reset({
+      businessId: "",
       number: nextNumber,
       name: "",
       address: "",
@@ -254,6 +268,35 @@ export default function BranchesPage() {
             </DialogHeader>
             <Form {...form}>
               <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
+                {isSistemas && (
+                  <FormField
+                    control={form.control}
+                    name="businessId"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Negocio</FormLabel>
+                        <Select
+                          value={field.value}
+                          onValueChange={field.onChange}
+                        >
+                          <FormControl>
+                            <SelectTrigger data-testid="select-business">
+                              <SelectValue placeholder="Seleccionar negocio" />
+                            </SelectTrigger>
+                          </FormControl>
+                          <SelectContent>
+                            {businesses.map((business) => (
+                              <SelectItem key={business.id} value={business.id}>
+                                {business.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                )}
                 <FormField
                   control={form.control}
                   name="number"
