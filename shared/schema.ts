@@ -349,13 +349,13 @@ export const insertBusinessSchema = createInsertSchema(businesses).omit({
   id: true,
   createdAt: true,
   updatedAt: true,
+  adminUserId: true,
 }).extend({
   razonSocial: z.string().min(1, "La razón social es requerida"),
-  cuit: z.string().optional().nullable(),
-  encargado: z.string().optional().nullable(),
-  telefono: z.string().optional().nullable(),
-  mail: z.string().email("Email inválido").optional().nullable(),
-  adminUserId: z.string().min(1, "El administrador es requerido"),
+  cuit: z.string().optional().or(z.literal("")).nullable(),
+  encargado: z.string().optional().or(z.literal("")).nullable(),
+  telefono: z.string().optional().or(z.literal("")).nullable(),
+  mail: z.string().email("Email inválido").optional().or(z.literal("")).nullable(),
   isActive: z.boolean().default(true),
 });
 
