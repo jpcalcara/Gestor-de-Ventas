@@ -83,7 +83,7 @@ interface Business {
 }
 
 export default function BranchesPage() {
-  const { isAdmin, user } = useAuth();
+  const { isAdmin, user, businessId } = useAuth();
   const { toast } = useToast();
   const isSistemas = user?.role === "sistemas";
   const [isDialogOpen, setIsDialogOpen] = useState(false);
@@ -200,6 +200,7 @@ export default function BranchesPage() {
   const openEditDialog = (branch: BranchData) => {
     setEditingBranch(branch);
     form.reset({
+      businessId: businessId || "",
       number: branch.number,
       name: branch.name,
       address: branch.address,
@@ -214,7 +215,7 @@ export default function BranchesPage() {
       ? Math.max(...branches.map(b => b.number)) + 1 
       : 1;
     form.reset({
-      businessId: "",
+      businessId: businessId || "",
       number: nextNumber,
       name: "",
       address: "",
