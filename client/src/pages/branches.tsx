@@ -200,7 +200,7 @@ export default function BranchesPage() {
   const openEditDialog = (branch: BranchData) => {
     setEditingBranch(branch);
     form.reset({
-      businessId: businessId || "",
+      businessId: branch.businessId || businessId || "",
       number: branch.number,
       name: branch.name,
       address: branch.address,
