@@ -55,6 +55,7 @@ interface UserData {
 
 interface BranchData {
   id: string;
+  businessId: string;
   number: number;
   name: string;
   address: string;
@@ -282,7 +283,11 @@ export default function BranchesPage() {
                         >
                           <FormControl>
                             <SelectTrigger data-testid="select-business">
-                              <SelectValue placeholder="Seleccionar negocio" />
+                              <SelectValue placeholder="Seleccionar negocio">
+                                {field.value 
+                                  ? businesses.find(b => b.id === field.value)?.name 
+                                  : "Seleccionar negocio"}
+                              </SelectValue>
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
