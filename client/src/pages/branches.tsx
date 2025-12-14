@@ -277,23 +277,16 @@ export default function BranchesPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Negocio</FormLabel>
-                        <Select
-                          value={field.value}
-                          onValueChange={field.onChange}
-                        >
+                        <Select value={field.value} onValueChange={field.onChange}>
                           <FormControl>
                             <SelectTrigger data-testid="select-business">
-                              <SelectValue placeholder="Seleccionar negocio">
-                                {field.value 
-                                  ? businesses.find(b => b.id === field.value)?.name 
-                                  : "Seleccionar negocio"}
-                              </SelectValue>
+                              <SelectValue placeholder="Seleccionar negocio" />
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
                             {businesses.map((business) => (
                               <SelectItem key={business.id} value={business.id}>
-                                {business.name}
+                                <span data-testid={`option-business-${business.id}`}>{business.name}</span>
                               </SelectItem>
                             ))}
                           </SelectContent>
