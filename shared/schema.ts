@@ -120,6 +120,7 @@ export const businesses = pgTable("businesses", {
 export const branches = pgTable("branches", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   businessId: varchar("business_id").notNull().references(() => businesses.id),
+  adminUserId: varchar("admin_user_id").references(() => users.id),
   number: integer("number").notNull(),
   name: text("name").notNull(),
   address: text("address").notNull(),

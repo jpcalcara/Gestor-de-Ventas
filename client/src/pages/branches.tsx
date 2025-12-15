@@ -56,6 +56,7 @@ interface UserData {
 interface BranchData {
   id: string;
   businessId: string;
+  adminUserId: string | null;
   number: number;
   name: string;
   address: string;
