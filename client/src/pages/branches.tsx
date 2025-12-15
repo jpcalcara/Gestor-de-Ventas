@@ -59,8 +59,6 @@ interface BranchData {
   number: number;
   name: string;
   address: string;
-  adminUserId: string | null;
-  adminUser?: UserData;
   isActive: boolean;
   createdAt: string;
   updatedAt?: string;
@@ -79,7 +77,8 @@ type BranchFormValues = z.infer<typeof branchFormSchema>;
 
 interface Business {
   id: string;
-  name: string;
+  razonSocial: string;
+  adminUserId: string;
   isActive: boolean;
 }
 
@@ -200,12 +199,14 @@ export default function BranchesPage() {
 
   const openEditDialog = (branch: BranchData) => {
     setEditingBranch(branch);
+    // adminUserId viene del business asociado, no de la branch
+    const associatedBusiness = businesses.find(b => b.id === branch.businessId);
     form.reset({
       businessId: branch.businessId || businessId || "",
       number: branch.number,
       name: branch.name,
       address: branch.address,
-      adminUserId: branch.adminUserId,
+      adminUserId: associatedBusiness?.adminUserId || null,
       isActive: branch.isActive,
     });
   };
@@ -282,7 +283,7 @@ export default function BranchesPage() {
                             <SelectTrigger data-testid="select-business">
                               <span className="text-foreground truncate">
                                 {field.value 
-                                  ? businesses.find(b => b.id === field.value)?.name || "Seleccionar negocio"
+                                  ? businesses.find(b => b.id === field.value)?.razonSocial || "Seleccionar negocio"
                                   : "Seleccionar negocio"}
                               </span>
                             </SelectTrigger>
@@ -290,7 +291,7 @@ export default function BranchesPage() {
                           <SelectContent>
                             {businesses.map((business) => (
                               <SelectItem key={business.id} value={business.id}>
-                                <span className="text-foreground">{business.name}</span>
+                                <span className="text-foreground">{business.razonSocial}</span>
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -497,14 +498,18 @@ export default function BranchesPage() {
                   <MapPin className="h-4 w-4 text-muted-foreground mt-0.5" />
                   <span className="text-muted-foreground">{branch.address}</span>
                 </div>
-                {branch.adminUser && (
-                  <div className="flex items-start gap-2 text-sm">
-                    <User className="h-4 w-4 text-muted-foreground mt-0.5" />
-                    <span className="text-muted-foreground">
-                      Admin: {branch.adminUser.firstName} {branch.adminUser.lastName}
-                    </span>
-                  </div>
-                )}
+                {(() => {
+                  const business = businesses.find(b => b.id === branch.businessId);
+                  const admin = business ? adminUsers.find(u => u.id === business.adminUserId) : null;
+                  return admin ? (
+                    <div className="flex items-start gap-2 text-sm">
+                      <User className="h-4 w-4 text-muted-foreground mt-0.5" />
+                      <span className="text-muted-foreground">
+                        Admin: {admin.firstName} {admin.lastName}
+                      </span>
+                    </div>
+                  ) : null;
+                })()}
                 {isSistemas && (
                   <div className="flex justify-end gap-2 pt-2">
                     <Button
