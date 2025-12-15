@@ -357,42 +357,43 @@ export default function BranchesPage() {
                   <FormField
                     control={form.control}
                     name="adminUserId"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Administrador del Negocio</FormLabel>
-                        <Select
-                          value={field.value || "none"}
-                          onValueChange={(value) => field.onChange(value === "none" ? null : value)}
-                        >
-                          <FormControl>
-                            <SelectTrigger data-testid="select-admin-user">
-                              <span className="text-foreground truncate">
-                                {field.value
-                                  ? (() => {
-                                      const admin = adminUsers.find(u => u.id === field.value);
-                                      return admin ? `${admin.firstName} ${admin.lastName}` : "Sin administrador asignado";
-                                    })()
-                                  : "Sin administrador asignado"}
-                              </span>
-                            </SelectTrigger>
-                          </FormControl>
-                          <SelectContent>
-                            <SelectItem value="none">
-                              <span className="text-foreground">Sin administrador asignado</span>
-                            </SelectItem>
-                            {adminUsers.map((adminUser) => (
-                              <SelectItem key={adminUser.id} value={adminUser.id}>
-                                <span className="text-foreground">{adminUser.firstName} {adminUser.lastName} ({adminUser.email})</span>
+                    render={({ field }) => {
+                      const selectedAdmin = field.value ? adminUsers.find(u => u.id === field.value) : null;
+                      const displayText = selectedAdmin 
+                        ? `${selectedAdmin.firstName} ${selectedAdmin.lastName}` 
+                        : "Sin administrador asignado";
+                      return (
+                        <FormItem>
+                          <FormLabel>Administrador del Negocio</FormLabel>
+                          <Select
+                            value={field.value || "none"}
+                            onValueChange={(value) => field.onChange(value === "none" ? null : value)}
+                          >
+                            <FormControl>
+                              <SelectTrigger data-testid="select-admin-user">
+                                <SelectValue placeholder="Sin administrador asignado">
+                                  <span className="text-foreground truncate">{displayText}</span>
+                                </SelectValue>
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              <SelectItem value="none">
+                                <span className="text-foreground">Sin administrador asignado</span>
                               </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs text-muted-foreground">
-                          Asocia esta sucursal a un usuario administrador para identificar el negocio
-                        </p>
-                        <FormMessage />
-                      </FormItem>
-                    )}
+                              {adminUsers.map((adminUser) => (
+                                <SelectItem key={adminUser.id} value={adminUser.id}>
+                                  <span className="text-foreground">{adminUser.firstName} {adminUser.lastName} ({adminUser.email})</span>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground">
+                            Asocia esta sucursal a un usuario administrador para identificar el negocio
+                          </p>
+                          <FormMessage />
+                        </FormItem>
+                      );
+                    }}
                   />
                 )}
                 <FormField
