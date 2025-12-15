@@ -277,10 +277,14 @@ export default function BranchesPage() {
                     render={({ field }) => (
                       <FormItem>
                         <FormLabel>Negocio</FormLabel>
-                        <Select value={field.value} onValueChange={field.onChange}>
+                        <Select value={field.value || ""} onValueChange={field.onChange}>
                           <FormControl>
                             <SelectTrigger data-testid="select-business">
-                              <SelectValue placeholder="Seleccionar negocio" />
+                              <SelectValue>
+                                {field.value 
+                                  ? businesses.find(b => b.id === field.value)?.name || "Seleccionar negocio"
+                                  : "Seleccionar negocio"}
+                              </SelectValue>
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
@@ -361,14 +365,21 @@ export default function BranchesPage() {
                         >
                           <FormControl>
                             <SelectTrigger data-testid="select-admin-user">
-                              <SelectValue placeholder="Seleccionar administrador (opcional)" />
+                              <SelectValue>
+                                {field.value
+                                  ? (() => {
+                                      const admin = adminUsers.find(u => u.id === field.value);
+                                      return admin ? `${admin.firstName} ${admin.lastName}` : "Seleccionar administrador (opcional)";
+                                    })()
+                                  : "Sin administrador asignado"}
+                              </SelectValue>
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
                             <SelectItem value="none">Sin administrador asignado</SelectItem>
                             {adminUsers.map((adminUser) => (
                               <SelectItem key={adminUser.id} value={adminUser.id}>
-                                {adminUser.firstName} {adminUser.lastName} ({adminUser.email})
+                                <span className="text-foreground">{adminUser.firstName} {adminUser.lastName} ({adminUser.email})</span>
                               </SelectItem>
                             ))}
                           </SelectContent>
