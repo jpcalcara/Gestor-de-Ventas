@@ -286,7 +286,7 @@ export default function BranchesPage() {
                           <SelectContent>
                             {businesses.map((business) => (
                               <SelectItem key={business.id} value={business.id}>
-                                <span data-testid={`option-business-${business.id}`}>{business.name}</span>
+                                <span className="text-foreground" data-testid={`option-business-${business.id}`}>{business.name}</span>
                               </SelectItem>
                             ))}
                           </SelectContent>
