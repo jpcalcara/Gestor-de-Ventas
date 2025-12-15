@@ -280,17 +280,17 @@ export default function BranchesPage() {
                         <Select value={field.value || ""} onValueChange={field.onChange}>
                           <FormControl>
                             <SelectTrigger data-testid="select-business">
-                              <SelectValue>
+                              <span className="text-foreground truncate">
                                 {field.value 
                                   ? businesses.find(b => b.id === field.value)?.name || "Seleccionar negocio"
                                   : "Seleccionar negocio"}
-                              </SelectValue>
+                              </span>
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
                             {businesses.map((business) => (
                               <SelectItem key={business.id} value={business.id}>
-                                <span className="text-foreground" data-testid={`option-business-${business.id}`}>{business.name}</span>
+                                <span className="text-foreground">{business.name}</span>
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -365,18 +365,20 @@ export default function BranchesPage() {
                         >
                           <FormControl>
                             <SelectTrigger data-testid="select-admin-user">
-                              <SelectValue>
+                              <span className="text-foreground truncate">
                                 {field.value
                                   ? (() => {
                                       const admin = adminUsers.find(u => u.id === field.value);
-                                      return admin ? `${admin.firstName} ${admin.lastName}` : "Seleccionar administrador (opcional)";
+                                      return admin ? `${admin.firstName} ${admin.lastName}` : "Sin administrador asignado";
                                     })()
                                   : "Sin administrador asignado"}
-                              </SelectValue>
+                              </span>
                             </SelectTrigger>
                           </FormControl>
                           <SelectContent>
-                            <SelectItem value="none">Sin administrador asignado</SelectItem>
+                            <SelectItem value="none">
+                              <span className="text-foreground">Sin administrador asignado</span>
+                            </SelectItem>
                             {adminUsers.map((adminUser) => (
                               <SelectItem key={adminUser.id} value={adminUser.id}>
                                 <span className="text-foreground">{adminUser.firstName} {adminUser.lastName} ({adminUser.email})</span>
