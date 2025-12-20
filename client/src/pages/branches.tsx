@@ -200,14 +200,12 @@ export default function BranchesPage() {
 
   const openEditDialog = (branch: BranchData) => {
     setEditingBranch(branch);
-    // adminUserId viene del business asociado, no de la branch
-    const associatedBusiness = businesses.find(b => b.id === branch.businessId);
     form.reset({
       businessId: branch.businessId || businessId || "",
       number: branch.number,
       name: branch.name,
       address: branch.address,
-      adminUserId: associatedBusiness?.adminUserId || null,
+      adminUserId: branch.adminUserId || null,
       isActive: branch.isActive,
     });
   };
@@ -501,16 +499,15 @@ export default function BranchesPage() {
                   <span className="text-muted-foreground">{branch.address}</span>
                 </div>
                 {(() => {
-                  const business = businesses.find(b => b.id === branch.businessId);
-                  const admin = business ? adminUsers.find(u => u.id === business.adminUserId) : null;
-                  return admin ? (
+                  const admin = branch.adminUserId ? adminUsers.find(u => u.id === branch.adminUserId) : null;
+                  return (
                     <div className="flex items-start gap-2 text-sm">
                       <User className="h-4 w-4 text-muted-foreground mt-0.5" />
                       <span className="text-muted-foreground">
-                        Admin: {admin.firstName} {admin.lastName}
+                        Admin: {admin ? `${admin.firstName} ${admin.lastName}` : "Sin asignar"}
                       </span>
                     </div>
-                  ) : null;
+                  );
                 })()}
                 {isSistemas && (
                   <div className="flex justify-end gap-2 pt-2">
