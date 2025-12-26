@@ -41,7 +41,7 @@ import {
   updateSaleSchema,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, sql, and } from "drizzle-orm";
+import { eq, desc, sql, and, or } from "drizzle-orm";
 
 export interface IStorage {
   getProducts(branchId?: string): Promise<Product[]>;
@@ -718,12 +718,19 @@ export class DatabaseStorage implements IStorage {
     }
 
     if (role === "admin") {
-      // Admins SOLO ven sucursales de negocios que administran
+      // Admins ven sucursales donde:
+      // 1. Son adminUserId del negocio (business.adminUserId)
+      // 2. Son adminUserId de la sucursal directamente (branch.adminUserId)
+      // 3. Están asignados vía userBranches
       return await db
         .select()
         .from(branches)
-        .where(eq(branches.businessId, 
-          sql`(SELECT id FROM businesses WHERE admin_user_id = ${userId})`
+        .where(or(
+          eq(branches.businessId, 
+            sql`(SELECT id FROM businesses WHERE admin_user_id = ${userId})`
+          ),
+          eq(branches.adminUserId, userId),
+          sql`${branches.id} IN (SELECT branch_id FROM user_branches WHERE user_id = ${userId})`
         ))
         .orderBy(branches.number);
     }
@@ -765,6 +772,7 @@ export class DatabaseStorage implements IStorage {
     }
 
     if (role === "admin") {
+      // Verificar si es admin del negocio
       const [adminBranch] = await db
         .select()
         .from(branches)
@@ -776,6 +784,17 @@ export class DatabaseStorage implements IStorage {
         ));
       
       if (adminBranch) return true;
+
+      // Verificar si es admin directo de la sucursal
+      const [directAdmin] = await db
+        .select()
+        .from(branches)
+        .where(and(
+          eq(branches.id, branchId),
+          eq(branches.adminUserId, userId)
+        ));
+      
+      if (directAdmin) return true;
     }
 
     const [assignment] = await db
