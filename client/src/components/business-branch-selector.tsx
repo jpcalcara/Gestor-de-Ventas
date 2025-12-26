@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Building2, ChevronRight } from "lucide-react";
+import { Building2, MapPin } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -10,14 +10,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-
-interface Business {
-  id: string;
-  name: string;
-  isActive: boolean;
-}
 
 interface Branch {
   id: string;
@@ -28,13 +21,13 @@ interface Branch {
 }
 
 export function BusinessBranchSelectorModal() {
-  const { businessId, branchId, selectBranch, isBranchLoading, user } = useAuth();
+  const { branchId, selectBranch, isBranchLoading, user } = useAuth();
   const { toast } = useToast();
   const [isSelecting, setIsSelecting] = useState(false);
 
   const { data: branches = [], isLoading: branchesLoading } = useQuery<Branch[]>({
-    queryKey: ["/api/branches", businessId],
-    enabled: !!businessId && !!user,
+    queryKey: ["/api/branches"],
+    enabled: !!user,
   });
 
   const activeBranches = branches.filter((b) => b.isActive);
@@ -43,7 +36,11 @@ export function BusinessBranchSelectorModal() {
     return null;
   }
 
-  if (!businessId || branchId) {
+  if (branchId) {
+    return null;
+  }
+
+  if (activeBranches.length === 0) {
     return null;
   }
 
@@ -67,7 +64,7 @@ export function BusinessBranchSelectorModal() {
   };
 
   return (
-    <Dialog open={!branchId}>
+    <Dialog open={!branchId && activeBranches.length > 0}>
       <DialogContent className="max-w-md" hideCloseButton>
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -79,30 +76,27 @@ export function BusinessBranchSelectorModal() {
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3 mt-4">
-          {activeBranches.length > 0 ? (
-            activeBranches.map((branch) => (
-              <Card
-                key={branch.id}
-                className="cursor-pointer hover-elevate"
-                onClick={() => !isSelecting && handleSelectBranch(branch)}
-                data-testid={`card-select-branch-${branch.id}`}
-              >
-                <CardContent className="flex items-center gap-3 p-4">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10">
-                    <span className="text-lg font-semibold text-primary">{branch.number}</span>
-                  </div>
-                  <div className="flex-1">
-                    <p className="font-medium">{branch.name}</p>
-                    <p className="text-sm text-muted-foreground">{branch.address}</p>
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          ) : (
-            <div className="text-center py-8">
-              <p className="text-muted-foreground">No hay sucursales disponibles</p>
-            </div>
-          )}
+          {activeBranches.map((branch) => (
+            <Card
+              key={branch.id}
+              className="cursor-pointer hover-elevate"
+              onClick={() => !isSelecting && handleSelectBranch(branch)}
+              data-testid={`card-select-branch-${branch.id}`}
+            >
+              <CardContent className="flex items-center gap-3 p-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-md bg-primary/10">
+                  <span className="text-lg font-semibold text-primary">{branch.number}</span>
+                </div>
+                <div className="flex-1">
+                  <p className="font-medium">{branch.name}</p>
+                  <p className="text-sm text-muted-foreground flex items-center gap-1">
+                    <MapPin className="h-3 w-3" />
+                    {branch.address}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
         </div>
       </DialogContent>
     </Dialog>
