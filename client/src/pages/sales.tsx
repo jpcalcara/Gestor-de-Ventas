@@ -54,6 +54,7 @@ export default function SalesPage() {
 
   const { data: products, isLoading: productsLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
+    enabled: !!branchId,
   });
 
   const { data: branchStocks = [], isLoading: stocksLoading } = useQuery<BranchStockWithProduct[]>({
