@@ -797,6 +797,43 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/businesses/:id/admins", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const admins = await storage.getBusinessAdmins(req.params.id);
+      res.json(admins);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/businesses/:id/admins", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      if (req.session.userRole !== "sistemas") {
+        return res.status(403).json({ message: "Solo usuarios sistemas pueden asignar administradores" });
+      }
+
+      const { adminIds } = req.body;
+      if (!Array.isArray(adminIds)) {
+        return res.status(400).json({ message: "adminIds debe ser un array" });
+      }
+
+      await storage.setBusinessAdmins(req.params.id, adminIds);
+
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "asignar_admins_negocio",
+        "negocio",
+        req.params.id,
+        `Administradores asignados: ${adminIds.length} admin(es)`
+      );
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.delete("/api/businesses/:id", requireAdmin, async (req: Request, res: Response) => {
     try {
       if (req.session.userRole !== "sistemas") {

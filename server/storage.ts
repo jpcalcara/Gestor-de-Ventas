@@ -19,6 +19,7 @@ import {
   type UpdateCompanySettings,
   type Business,
   type InsertBusiness,
+  type BusinessAdmin,
   type Branch,
   type InsertBranch,
   type UpdateBranch,
@@ -35,6 +36,7 @@ import {
   passwordResetTokens,
   companySettings,
   businesses,
+  businessAdmins,
   branches,
   branchStocks,
   userBranches,
@@ -79,6 +81,8 @@ export interface IStorage {
   
   getBusinesses(): Promise<Business[]>;
   getBusinessesForUser(userId: string): Promise<Business[]>;
+  getBusinessAdmins(businessId: string): Promise<BusinessAdmin[]>;
+  setBusinessAdmins(businessId: string, userIds: string[]): Promise<void>;
   getBranches(): Promise<Branch[]>;
   getBranchesForBusiness(businessId: string): Promise<Branch[]>;
   getBranch(id: string): Promise<Branch | undefined>;
@@ -451,8 +455,21 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getBusinessesForUser(userId: string): Promise<Business[]> {
+    const businessIds = await db
+      .selectDistinct({ id: businessAdmins.businessId })
+      .from(businessAdmins)
+      .where(eq(businessAdmins.userId, userId));
+    
+    const adminBizIds = businessIds.map(b => b.id);
+    
     return await db.select().from(businesses).where(
-      and(eq(businesses.adminUserId, userId), eq(businesses.isActive, true))
+      and(
+        or(
+          eq(businesses.adminUserId, userId),
+          adminBizIds.length > 0 ? sql`${businesses.id} in (${sql.join(adminBizIds)})` : sql`false`
+        ),
+        eq(businesses.isActive, true)
+      )
     );
   }
 
@@ -476,6 +493,23 @@ export class DatabaseStorage implements IStorage {
   async deleteBusiness(id: string): Promise<boolean> {
     const result = await db.delete(businesses).where(eq(businesses.id, id));
     return result.rowCount !== null && result.rowCount > 0;
+  }
+
+  async getBusinessAdmins(businessId: string): Promise<BusinessAdmin[]> {
+    return await db.select().from(businessAdmins).where(eq(businessAdmins.businessId, businessId));
+  }
+
+  async setBusinessAdmins(businessId: string, userIds: string[]): Promise<void> {
+    await db.delete(businessAdmins).where(eq(businessAdmins.businessId, businessId));
+    
+    if (userIds.length > 0) {
+      await db.insert(businessAdmins).values(
+        userIds.map(userId => ({
+          userId,
+          businessId,
+        }))
+      );
+    }
   }
 
   async getBranches(): Promise<Branch[]> {

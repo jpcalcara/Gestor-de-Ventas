@@ -119,6 +119,13 @@ export const businesses = pgTable("businesses", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const businessAdmins = pgTable("business_admins", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  businessId: varchar("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const branches = pgTable("branches", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   businessId: varchar("business_id").notNull().references(() => businesses.id),
@@ -219,6 +226,18 @@ export const businessesRelations = relations(businesses, ({ one, many }) => ({
     references: [users.id],
   }),
   branches: many(branches),
+  businessAdmins: many(businessAdmins),
+}));
+
+export const businessAdminsRelations = relations(businessAdmins, ({ one }) => ({
+  user: one(users, {
+    fields: [businessAdmins.userId],
+    references: [users.id],
+  }),
+  business: one(businesses, {
+    fields: [businessAdmins.businessId],
+    references: [businesses.id],
+  }),
 }));
 
 export const branchesRelations = relations(branches, ({ one, many }) => ({
@@ -430,6 +449,7 @@ export type SaleOrderWithItems = SaleOrder & {
 
 export type Business = typeof businesses.$inferSelect;
 export type InsertBusiness = z.infer<typeof insertBusinessSchema>;
+export type BusinessAdmin = typeof businessAdmins.$inferSelect;
 export type Branch = typeof branches.$inferSelect;
 export type InsertBranch = z.infer<typeof insertBranchSchema>;
 export type UpdateBranch = z.infer<typeof updateBranchSchema>;

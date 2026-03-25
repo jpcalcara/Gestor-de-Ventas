@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Pencil, Trash2, Mail, Phone } from "lucide-react";
+import { Plus, Pencil, Trash2, Mail, Phone, Users } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -48,6 +49,13 @@ interface BusinessData {
   createdAt: string;
 }
 
+interface User {
+  id: string;
+  email: string;
+  name: string;
+  role: string;
+}
+
 const businessFormSchema = z.object({
   razonSocial: z.string().min(1, "La razón social es requerida"),
   cuit: z.string().optional().or(z.literal("")).nullable(),
@@ -66,10 +74,40 @@ export default function BusinessesPage() {
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingBusiness, setEditingBusiness] = useState<BusinessData | null>(null);
   const [deletingBusiness, setDeletingBusiness] = useState<BusinessData | null>(null);
+  const [managingAdmins, setManagingAdmins] = useState<BusinessData | null>(null);
+  const [selectedAdminIds, setSelectedAdminIds] = useState<string[]>([]);
 
   const { data: businesses = [], isLoading } = useQuery<BusinessData[]>({
     queryKey: ["/api/businesses"],
     enabled: isAdmin,
+  });
+
+  const { data: users = [] } = useQuery<User[]>({
+    queryKey: ["/api/users"],
+    enabled: isSistemas,
+  });
+
+  const { data: businessAdmins = [] } = useQuery({
+    queryKey: ["/api/businesses", managingAdmins?.id, "admins"],
+    enabled: !!managingAdmins,
+  });
+
+  const updateAdminsMutation = useMutation({
+    mutationFn: async ({ businessId, adminIds }: { businessId: string; adminIds: string[] }) => {
+      return await apiRequest("PATCH", `/api/businesses/${businessId}/admins`, { adminIds });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/businesses"] });
+      if (managingAdmins) {
+        queryClient.invalidateQueries({ queryKey: ["/api/businesses", managingAdmins.id, "admins"] });
+      }
+      toast({ title: "Administradores actualizados correctamente" });
+      setManagingAdmins(null);
+      setSelectedAdminIds([]);
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
   });
 
   const form = useForm<BusinessFormValues>({
@@ -150,6 +188,27 @@ export default function BusinessesPage() {
       isActive: business.isActive,
     });
   };
+
+  const openAdminsDialog = (business: BusinessData) => {
+    setManagingAdmins(business);
+    const currentAdminIds = businessAdmins.map((admin: any) => admin.userId);
+    setSelectedAdminIds(currentAdminIds);
+  };
+
+  const handleSaveAdmins = () => {
+    if (!managingAdmins) return;
+    updateAdminsMutation.mutate({
+      businessId: managingAdmins.id,
+      adminIds: selectedAdminIds,
+    });
+  };
+
+  useEffect(() => {
+    if (businessAdmins && businessAdmins.length > 0) {
+      const currentAdminIds = businessAdmins.map((admin: any) => admin.userId);
+      setSelectedAdminIds(currentAdminIds);
+    }
+  }, [businessAdmins]);
 
   const openCreateDialog = () => {
     setEditingBusiness(null);
@@ -399,9 +458,18 @@ export default function BusinessesPage() {
                     {business.mail}
                   </p>
                 )}
-                <div className="flex gap-2 pt-4">
+                <div className="flex flex-wrap gap-2 pt-4">
                   {isSistemas && (
                     <>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => openAdminsDialog(business)}
+                        data-testid={`button-manage-admins-${business.id}`}
+                      >
+                        <Users className="h-4 w-4 mr-1" />
+                        Admins
+                      </Button>
                       <Button
                         size="sm"
                         variant="ghost"
@@ -449,6 +517,65 @@ export default function BusinessesPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={!!managingAdmins} onOpenChange={(open) => {
+        if (!open) {
+          setManagingAdmins(null);
+          setSelectedAdminIds([]);
+        }
+      }}>
+        <DialogContent className="max-w-md max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Gestionar Administradores - {managingAdmins?.razonSocial}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-4">
+            {users.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">No hay usuarios disponibles</p>
+            ) : (
+              users.map((userItem) => (
+                <div key={userItem.id} className="flex items-center space-x-2 p-2 hover-elevate rounded">
+                  <Checkbox
+                    id={`admin-${userItem.id}`}
+                    checked={selectedAdminIds.includes(userItem.id)}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        setSelectedAdminIds([...selectedAdminIds, userItem.id]);
+                      } else {
+                        setSelectedAdminIds(selectedAdminIds.filter(id => id !== userItem.id));
+                      }
+                    }}
+                    data-testid={`checkbox-admin-${userItem.id}`}
+                  />
+                  <label htmlFor={`admin-${userItem.id}`} className="flex-1 cursor-pointer text-sm">
+                    <div className="font-medium">{userItem.name || userItem.email}</div>
+                    <div className="text-xs text-muted-foreground">{userItem.email}</div>
+                  </label>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="flex justify-end gap-2 pt-4 border-t">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setManagingAdmins(null);
+                setSelectedAdminIds([]);
+              }}
+              data-testid="button-cancel-admins"
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={handleSaveAdmins}
+              disabled={updateAdminsMutation.isPending}
+              data-testid="button-save-admins"
+            >
+              {updateAdminsMutation.isPending ? "Guardando..." : "Guardar"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
