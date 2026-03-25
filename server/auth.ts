@@ -145,14 +145,32 @@ export function registerAuthRoutes(app: any) {
         return res.status(401).json({ message: "Credenciales inválidas" });
       }
 
+      if (user.failedLoginAttempts >= 5) {
+        const lastFailed = user.lastFailedLoginAt ? new Date(user.lastFailedLoginAt) : new Date();
+        const timeSinceLastAttempt = Date.now() - lastFailed.getTime();
+        const lockoutDuration = 15 * 60 * 1000;
+        
+        if (timeSinceLastAttempt < lockoutDuration) {
+          return res.status(429).json({ message: "Cuenta bloqueada temporalmente. Intente de nuevo en 15 minutos." });
+        } else {
+          await storage.updateUser(user.id, { failedLoginAttempts: 0, lastFailedLoginAt: null });
+        }
+      }
+
       const isValid = await comparePassword(password, user.password);
       if (!isValid) {
+        await storage.updateUser(user.id, { 
+          failedLoginAttempts: (user.failedLoginAttempts || 0) + 1,
+          lastFailedLoginAt: new Date()
+        });
         return res.status(401).json({ message: "Credenciales inválidas" });
       }
 
       if (!user.isActive && user.role !== "sistemas") {
         return res.status(403).json({ message: "Usuario deshabilitado. Contacte al administrador." });
       }
+
+      await storage.updateUser(user.id, { failedLoginAttempts: 0, lastFailedLoginAt: null });
 
       req.session.userId = user.id;
       req.session.userEmail = user.email;

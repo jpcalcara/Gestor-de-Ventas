@@ -72,8 +72,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!branchId) {
         return res.status(400).json({ message: "Debe seleccionar una sucursal primero" });
       }
+      const search = (req.query.search as string || "").toLowerCase().trim();
       const products = await storage.getProducts(branchId);
-      res.json(products);
+      
+      if (search) {
+        const filtered = products.filter(p => 
+          p.title.toLowerCase().includes(search) || 
+          p.description.toLowerCase().includes(search)
+        );
+        res.json(filtered);
+      } else {
+        res.json(products);
+      }
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -108,6 +118,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: validationError.message });
       }
 
+      const existingProduct = await storage.getProductByTitle(result.data.title, branchId);
+      if (existingProduct) {
+        return res.status(400).json({ message: "Ya existe un producto con este nombre en la sucursal" });
+      }
+
       const product = await storage.createProduct({ ...result.data, branchId });
       
       await createAuditLog(
@@ -137,6 +152,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!result.success) {
         const validationError = fromError(result.error);
         return res.status(400).json({ message: validationError.message });
+      }
+
+      const currentProduct = await storage.getProductByBranch(req.params.id, branchId);
+      if (!currentProduct) {
+        return res.status(404).json({ message: "Producto no encontrado en esta sucursal" });
+      }
+
+      if (currentProduct.title !== result.data.title) {
+        const existingProduct = await storage.getProductByTitle(result.data.title, branchId);
+        if (existingProduct) {
+          return res.status(400).json({ message: "Ya existe otro producto con este nombre en la sucursal" });
+        }
       }
 
       const product = await storage.updateProduct(req.params.id, result.data, branchId);

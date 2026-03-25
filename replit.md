@@ -269,3 +269,29 @@ RESTful endpoints following resource-oriented patterns:
    - Response format: `{ logs: AuditLog[], total: number }`
    - Frontend: Added pagination UI with previous/next navigation buttons
 2. **Frontend Audit Page**: Updated to handle paginated audit logs with pagination controls
+
+### Feature Improvements
+1. **Product Search**: Added server-side filtering on `/api/products` endpoint with `?search=` query parameter
+   - Searches across product title and description
+   - Frontend already includes search UI with client-side filtering
+   
+2. **Unique Product Names**: Added validation to prevent duplicate product names within a branch
+   - Validation on both create and update endpoints
+   - Clear error messages when duplicate found
+
+3. **Login Attempt Limiting**: Implemented brute force protection
+   - Tracks `failedLoginAttempts` and `lastFailedLoginAt` in users table
+   - Locks account after 5 failed attempts for 15 minutes
+   - Returns 429 status code when account is locked
+   - Automatically resets counter on successful login or after lockout duration expires
+
+4. **Date Range Filters in Reports**: Replaced single-date filter with date range
+   - Defaults to last 30 days
+   - Users can select "from" and "to" dates
+   - Displays filtered sales data within selected range
+   - Properly formats and displays date range in report title
+
+5. **Event Logging for User Management**: Complete audit trail for user enable/disable operations
+   - Logs creation, edit, enable/disable, and deletion events
+   - Separate action types: `habilitar_usuario`, `deshabilitar_usuario`, `editar_usuario`, `eliminar_usuario`
+   - Detailed descriptions for audit trail

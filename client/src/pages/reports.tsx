@@ -33,7 +33,12 @@ const paymentMethodIcons: Record<string, typeof CreditCard> = {
 
 export default function ReportsPage() {
   const today = format(new Date(), "yyyy-MM-dd");
-  const [selectedDate, setSelectedDate] = useState(today);
+  const thirtyDaysAgo = format(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000), "yyyy-MM-dd");
+  
+  const [dateRange, setDateRange] = useState<{ from: string; to: string }>({
+    from: thirtyDaysAgo,
+    to: today,
+  });
   const [selectedProductId, setSelectedProductId] = useState<string>("all");
 
   const { data: saleOrders, isLoading: ordersLoading } = useQuery<SaleOrderWithItems[]>({
@@ -48,13 +53,13 @@ export default function ReportsPage() {
     if (!saleOrders) return [];
 
     return saleOrders.filter(order => {
-      const orderDate = new Date(order.createdAt);
+      const orderDate = startOfDay(new Date(order.createdAt));
+      const fromDate = parseISO(dateRange.from);
+      const toDate = parseISO(dateRange.to);
       
-      if (selectedDate && selectedDate.trim() !== "") {
-        const filterDate = parseISO(selectedDate);
-        const orderStart = startOfDay(orderDate);
-        const filterStart = startOfDay(filterDate);
-        if (orderStart.getTime() !== filterStart.getTime()) return false;
+      if (orderDate.getTime() < startOfDay(fromDate).getTime() || 
+          orderDate.getTime() > startOfDay(toDate).getTime()) {
+        return false;
       }
 
       if (selectedProductId !== "all") {
@@ -64,7 +69,7 @@ export default function ReportsPage() {
 
       return true;
     });
-  }, [saleOrders, selectedDate, selectedProductId]);
+  }, [saleOrders, dateRange, selectedProductId]);
 
   const totalRevenue = filteredOrders.reduce((sum, order) => sum + Number(order.totalAmount), 0);
   const totalItems = filteredOrders.reduce((sum, order) => 
@@ -72,12 +77,11 @@ export default function ReportsPage() {
   );
 
   const clearFilters = () => {
-    setSelectedDate(today);
+    setDateRange({ from: thirtyDaysAgo, to: today });
     setSelectedProductId("all");
   };
 
-  const hasActiveFilters = (selectedDate && selectedDate !== today) || selectedProductId !== "all";
-  const isShowingAllDates = !selectedDate || selectedDate.trim() === "";
+  const hasActiveFilters = (dateRange.from !== thirtyDaysAgo || dateRange.to !== today) || selectedProductId !== "all";
 
   const PaymentIcon = ({ method }: { method: string }) => {
     const Icon = paymentMethodIcons[method] || CreditCard;
@@ -131,15 +135,26 @@ export default function ReportsPage() {
           <CardTitle>Filtros</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="date-filter">Fecha</Label>
+              <Label htmlFor="date-from">Desde</Label>
               <Input
-                id="date-filter"
+                id="date-from"
                 type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                data-testid="input-date-filter"
+                value={dateRange.from}
+                onChange={(e) => setDateRange({ ...dateRange, from: e.target.value })}
+                data-testid="input-date-from"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="date-to">Hasta</Label>
+              <Input
+                id="date-to"
+                type="date"
+                value={dateRange.to}
+                onChange={(e) => setDateRange({ ...dateRange, to: e.target.value })}
+                data-testid="input-date-to"
               />
             </div>
 
@@ -178,11 +193,7 @@ export default function ReportsPage() {
       <Card>
         <CardHeader>
           <CardTitle>
-            {isShowingAllDates 
-              ? "Todas las Ventas" 
-              : selectedDate === today 
-                ? "Ventas de Hoy" 
-                : `Ventas del ${format(parseISO(selectedDate), "d 'de' MMMM", { locale: es })}`}
+            {`Ventas desde ${format(parseISO(dateRange.from), "d MMM", { locale: es })} hasta ${format(parseISO(dateRange.to), "d MMM yyyy", { locale: es })}`}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -196,12 +207,10 @@ export default function ReportsPage() {
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Calendar className="h-12 w-12 text-muted-foreground mb-4" />
               <h3 className="text-base font-medium" data-testid="text-no-sales">
-                {hasActiveFilters || isShowingAllDates ? "No se encontraron ventas" : "No hay ventas hoy"}
+                No se encontraron ventas
               </h3>
               <p className="text-sm text-muted-foreground mt-1 max-w-sm">
-                {hasActiveFilters || isShowingAllDates
-                  ? "Intenta ajustar los filtros de búsqueda"
-                  : "Las ventas aparecerán aquí cuando se registren"}
+                Intenta ajustar los filtros de búsqueda
               </p>
             </div>
           ) : (

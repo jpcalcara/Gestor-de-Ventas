@@ -29,6 +29,8 @@ export const users = pgTable("users", {
   avatar: text("avatar").default("default"),
   profileImageUrl: text("profile_image_url"),
   googleId: text("google_id").unique(),
+  failedLoginAttempts: integer("failed_login_attempts").notNull().default(0),
+  lastFailedLoginAt: timestamp("last_failed_login_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });

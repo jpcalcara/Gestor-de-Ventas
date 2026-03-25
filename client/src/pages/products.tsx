@@ -135,7 +135,7 @@ export default function ProductsPage() {
       ) : (
         <div className="space-y-2">
           {filteredProducts.map((product) => {
-            const lowStock = isLowStock(product.stock);
+            const lowStock = isLowStock(Number(product.stock));
             return (
               <Card key={product.id} className="hover-elevate" data-testid={`card-product-${product.id}`}>
                 <CardContent className="p-4">

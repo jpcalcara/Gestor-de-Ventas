@@ -46,6 +46,7 @@ import { eq, desc, sql, and, or } from "drizzle-orm";
 export interface IStorage {
   getProducts(branchId?: string): Promise<Product[]>;
   getProductByBranch(id: string, branchId: string): Promise<Product | undefined>;
+  getProductByTitle(title: string, branchId: string): Promise<Product | undefined>;
   createProduct(product: InsertProduct & { branchId: string }): Promise<Product>;
   updateProduct(id: string, product: InsertProduct, branchId: string): Promise<Product | undefined>;
   deleteProduct(id: string, branchId: string): Promise<boolean>;
@@ -114,6 +115,13 @@ export class DatabaseStorage implements IStorage {
   async getProductByBranch(id: string, branchId: string): Promise<Product | undefined> {
     const [product] = await db.select().from(products).where(
       and(eq(products.id, id), eq(products.branchId, branchId))
+    );
+    return product || undefined;
+  }
+
+  async getProductByTitle(title: string, branchId: string): Promise<Product | undefined> {
+    const [product] = await db.select().from(products).where(
+      and(eq(products.title, title), eq(products.branchId, branchId))
     );
     return product || undefined;
   }
