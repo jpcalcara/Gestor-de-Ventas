@@ -67,7 +67,7 @@ export interface IStorage {
   deleteUser(id: string): Promise<boolean>;
   
   createAuditLog(log: InsertAuditLog): Promise<AuditLog>;
-  getAuditLogs(): Promise<AuditLog[]>;
+  getAuditLogs(offset?: number, limit?: number): Promise<{ logs: AuditLog[]; total: number }> | Promise<AuditLog[]>;
   
   createPasswordResetToken(token: InsertPasswordResetToken): Promise<PasswordResetToken>;
   getPasswordResetToken(token: string): Promise<PasswordResetToken | undefined>;
@@ -94,7 +94,7 @@ export interface IStorage {
   getSaleOrdersByBranch(branchId: string): Promise<SaleOrderWithItems[]>;
   createSaleOrderForBranch(order: InsertSaleOrder & { userId: string; branchId: string }): Promise<SaleOrder>;
   
-  getAuditLogsByBranch(branchId: string): Promise<AuditLog[]>;
+  getAuditLogsByBranch(branchId: string, offset?: number, limit?: number): Promise<{ logs: AuditLog[]; total: number } | AuditLog[]>;
   
   getUserBranches(userId: string): Promise<UserBranch[]>;
   getBranchesForUser(userId: string, role: string): Promise<Branch[]>;
@@ -124,6 +124,7 @@ export class DatabaseStorage implements IStorage {
       .values({
         ...insertProduct,
         price: String(insertProduct.price),
+        stock: String(insertProduct.stock),
         branchId: insertProduct.branchId,
       })
       .returning();
@@ -136,6 +137,7 @@ export class DatabaseStorage implements IStorage {
       .set({
         ...insertProduct,
         price: String(insertProduct.price),
+        stock: String(insertProduct.stock),
       })
       .where(and(eq(products.id, id), eq(products.branchId, branchId)))
       .returning();
@@ -296,7 +298,7 @@ export class DatabaseStorage implements IStorage {
         .where(and(eq(products.id, productId), eq(products.branchId, branchId)))
         .returning();
 
-      if (!updatedProduct || updatedProduct.stock < 0) {
+      if (!updatedProduct || Number(updatedProduct.stock) < 0) {
         throw new Error(`Stock insuficiente`);
       }
 
@@ -386,8 +388,10 @@ export class DatabaseStorage implements IStorage {
     return log;
   }
 
-  async getAuditLogs(): Promise<AuditLog[]> {
-    return await db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt));
+  async getAuditLogs(offset: number = 0, limit: number = 50): Promise<{ logs: AuditLog[]; total: number }> {
+    const [{ count }] = await db.select({ count: sql`count(*)`.mapWith(Number) }).from(auditLogs);
+    const logs = await db.select().from(auditLogs).orderBy(desc(auditLogs.createdAt)).limit(limit).offset(offset);
+    return { logs, total: count };
   }
 
   async createPasswordResetToken(insertToken: InsertPasswordResetToken): Promise<PasswordResetToken> {
@@ -697,12 +701,16 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async getAuditLogsByBranch(branchId: string): Promise<AuditLog[]> {
-    return await db
+  async getAuditLogsByBranch(branchId: string, offset: number = 0, limit: number = 50): Promise<{ logs: AuditLog[]; total: number }> {
+    const [{ count }] = await db.select({ count: sql`count(*)`.mapWith(Number) }).from(auditLogs).where(eq(auditLogs.branchId, branchId));
+    const logs = await db
       .select()
       .from(auditLogs)
       .where(eq(auditLogs.branchId, branchId))
-      .orderBy(desc(auditLogs.createdAt));
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(limit)
+      .offset(offset);
+    return { logs, total: count };
   }
 
   async getUserBranches(userId: string): Promise<UserBranch[]> {

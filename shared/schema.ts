@@ -42,7 +42,7 @@ export const products = pgTable("products", {
   title: text("title").notNull(),
   description: text("description").notNull(),
   price: decimal("price", { precision: 10, scale: 2 }).notNull(),
-  stock: integer("stock").notNull().default(0),
+  stock: decimal("stock", { precision: 10, scale: 3 }).notNull().default("0"),
   unitType: text("unit_type").notNull().default("unidad"),
   imageUrl: text("image_url"),
 });
@@ -53,7 +53,7 @@ export type PaymentMethod = typeof paymentMethodEnum[number];
 export const saleOrders = pgTable("sale_orders", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
-  branchId: varchar("branch_id").references(() => branches.id),
+  branchId: varchar("branch_id").notNull().references(() => branches.id),
   paymentMethod: text("payment_method").notNull().default("efectivo"),
   paidAmount: decimal("paid_amount", { precision: 10, scale: 2 }),
   changeAmount: decimal("change_amount", { precision: 10, scale: 2 }),
@@ -64,7 +64,7 @@ export const saleOrders = pgTable("sale_orders", {
 export const sales = pgTable("sales", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   orderId: varchar("order_id").references(() => saleOrders.id),
-  branchId: varchar("branch_id").references(() => branches.id),
+  branchId: varchar("branch_id").notNull().references(() => branches.id),
   productId: varchar("product_id").notNull().references(() => products.id),
   userId: varchar("user_id").notNull().references(() => users.id),
   quantity: decimal("quantity", { precision: 10, scale: 3 }).notNull(),

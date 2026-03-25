@@ -1,7 +1,9 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
 import { 
@@ -11,7 +13,9 @@ import {
   Plus, 
   Pencil, 
   Trash2,
-  Clock
+  Clock,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 
 interface AuditLog {
@@ -45,11 +49,21 @@ const entityIcons: Record<string, typeof Package> = {
 
 export default function AuditPage() {
   const { isAdmin } = useAuth();
+  const [page, setPage] = useState(0);
+  const pageSize = 50;
 
-  const { data: logs = [], isLoading } = useQuery<AuditLog[]>({
-    queryKey: ["/api/audit-logs"],
+  const { data: response = { logs: [], total: 0 }, isLoading } = useQuery<{ logs: AuditLog[]; total: number }>({
+    queryKey: ["/api/audit-logs", page],
+    queryFn: async () => {
+      const res = await fetch(`/api/audit-logs?offset=${page * pageSize}&limit=${pageSize}`);
+      return res.json();
+    },
     enabled: isAdmin,
   });
+
+  const logs = response.logs || [];
+  const total = response.total || 0;
+  const totalPages = Math.ceil(total / pageSize);
 
   if (!isAdmin) {
     return (
@@ -107,52 +121,81 @@ export default function AuditPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="space-y-4">
-          {logs.map((log) => {
-            const EntityIcon = entityIcons[log.entity] || Package;
-            const ActionIcon = getActionIcon(log.actionType);
-            const actionInfo = actionTypeLabels[log.actionType] || { 
-              label: log.actionType, 
-              variant: "outline" as const 
-            };
-            const dateInfo = formatDate(log.createdAt);
+        <>
+          <div className="space-y-4">
+            {logs.map((log) => {
+              const EntityIcon = entityIcons[log.entity] || Package;
+              const ActionIcon = getActionIcon(log.actionType);
+              const actionInfo = actionTypeLabels[log.actionType] || { 
+                label: log.actionType, 
+                variant: "outline" as const 
+              };
+              const dateInfo = formatDate(log.createdAt);
 
-            return (
-              <Card key={log.id} data-testid={`audit-log-${log.id}`}>
-                <CardContent className="py-4">
-                  <div className="flex items-start gap-4">
-                    <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                      <EntityIcon className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-medium">{log.userName}</span>
-                        <Badge variant={actionInfo.variant}>
-                          <ActionIcon className="h-3 w-3 mr-1" />
-                          {actionInfo.label}
-                        </Badge>
-                        <Badge variant="outline" className="capitalize">
-                          {log.entity}
-                        </Badge>
+              return (
+                <Card key={log.id} data-testid={`audit-log-${log.id}`}>
+                  <CardContent className="py-4">
+                    <div className="flex items-start gap-4">
+                      <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                        <EntityIcon className="h-5 w-5 text-muted-foreground" />
                       </div>
-                      {log.details && (
-                        <p className="text-sm text-muted-foreground mt-1">
-                          {log.details}
-                        </p>
-                      )}
-                      <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-                        <Clock className="h-3 w-3" />
-                        <span title={dateInfo.absolute}>{dateInfo.relative}</span>
-                        <span>•</span>
-                        <span>{dateInfo.absolute}</span>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-medium">{log.userName}</span>
+                          <Badge variant={actionInfo.variant}>
+                            <ActionIcon className="h-3 w-3 mr-1" />
+                            {actionInfo.label}
+                          </Badge>
+                          <Badge variant="outline" className="capitalize">
+                            {log.entity}
+                          </Badge>
+                        </div>
+                        {log.details && (
+                          <p className="text-sm text-muted-foreground mt-1">
+                            {log.details}
+                          </p>
+                        )}
+                        <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
+                          <Clock className="h-3 w-3" />
+                          <span title={dateInfo.absolute}>{dateInfo.relative}</span>
+                          <span>•</span>
+                          <span>{dateInfo.absolute}</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between mt-6 pt-6 border-t">
+              <div className="text-sm text-muted-foreground">
+                {total === 0 ? "Sin registros" : `Mostrando ${page * pageSize + 1}-${Math.min((page + 1) * pageSize, total)} de ${total}`}
+              </div>
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setPage(p => Math.max(0, p - 1))}
+                  disabled={page === 0}
+                  data-testid="button-audit-prev"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))}
+                  disabled={page >= totalPages - 1}
+                  data-testid="button-audit-next"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

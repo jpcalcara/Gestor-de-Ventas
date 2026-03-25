@@ -651,10 +651,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/audit-logs", requireAdmin, async (_req: Request, res: Response) => {
+  app.get("/api/audit-logs", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const logs = await storage.getAuditLogs();
-      res.json(logs);
+      const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
+      const limit = Math.max(1, Math.min(100, parseInt(req.query.limit as string) || 50));
+      const result = await storage.getAuditLogs(offset, limit);
+      res.json(result);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -1251,8 +1253,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (req.params.branchId !== req.session.branchId) {
         return res.status(403).json({ message: "No tiene acceso a esta sucursal" });
       }
-      const logs = await storage.getAuditLogsByBranch(req.params.branchId);
-      res.json(logs);
+      const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
+      const limit = Math.max(1, Math.min(100, parseInt(req.query.limit as string) || 50));
+      const result = await storage.getAuditLogsByBranch(req.params.branchId, offset, limit);
+      res.json(result);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

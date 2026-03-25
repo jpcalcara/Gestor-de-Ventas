@@ -38,8 +38,9 @@ Preferred communication style: Simple, everyday language.
 - Session-based authentication with PostgreSQL session store
 - Role validation from database on every protected request
 - Active status check on login (disabled users are blocked)
-- SSO users default to "vendedor" role (no privilege escalation)
+- SSO users default to "vendedor" role (no privilege escalation) - Fixed: Google SSO now assigns vendedor instead of admin
 - Complete audit trail of all system operations including user enable/disable actions
+- Audit log FK constraint safe: branchId uses ON DELETE SET NULL to prevent cascade deletions
 
 ## Branch Isolation (Multi-Branch Support)
 
@@ -154,13 +155,15 @@ RESTful endpoints following resource-oriented patterns:
 - UUID primary key with auto-generation
 - Title and description (text)
 - Price (decimal with 10,2 precision)
-- Stock quantity (decimal with 10,3 precision for weight-based items)
+- Stock quantity (decimal with 10,3 precision) - supports unidad, gramos, and litros
 - Unit type: unidad (count), gramos (weight), litros (volume)
 - Optional image URL (text)
+- BranchId (NOT NULL FK to branches)
 
 **Sale Orders Table:**
 - UUID primary key with auto-generation
 - User reference (vendor who made the sale)
+- BranchId (NOT NULL FK to branches) - ensures branch isolation
 - Payment method: efectivo, debito, credito, qr, transferencia
 - Paid amount and change amount (for cash payments)
 - Total amount (decimal with 10,2 precision)
@@ -170,12 +173,22 @@ RESTful endpoints following resource-oriented patterns:
 - UUID primary key with auto-generation
 - Foreign key reference to sale_orders (nullable for backward compatibility)
 - Foreign key reference to products
-- Quantity sold (decimal for weight-based items)
+- BranchId (NOT NULL FK to branches) - ensures branch isolation
+- Quantity sold (decimal with 10,3 precision for weight-based items)
 - Unit type at time of sale
 - Unit price snapshot (decimal)
 - Calculated total price (decimal)
 - Edit tracking (isEdited flag)
 - Timestamps for creation and updates
+
+**Audit Logs Table:**
+- UUID primary key with auto-generation
+- User reference (FK to users)
+- BranchId (nullable FK to branches, uses ON DELETE SET NULL) - safe branch deletion without cascading
+- Action type (create, edit, delete, etc.)
+- Entity type and ID
+- Detailed action description
+- Timestamp for auditing
 
 **Business Logic:**
 - Sales automatically reduce product stock
@@ -238,3 +251,21 @@ RESTful endpoints following resource-oriented patterns:
 
 ### Session Management
 - **connect-pg-simple** - PostgreSQL session store (configured but not actively used in current implementation)
+
+## Recent Improvements (2026-03-25)
+
+### Security & Stability Fixes
+1. **Google SSO Role Assignment**: Fixed to assign 'vendedor' role instead of 'admin' for new SSO users (prevents privilege escalation)
+2. **Audit Log Constraint Safety**: Added ON DELETE SET NULL to auditLogs.branchId FK to prevent cascade deletions when branches are deleted
+
+### Schema Improvements
+1. **Product Stock Type**: Changed from `integer` to `decimal(10,3)` to properly support weight-based inventory (gramos, litros)
+2. **Sales Order Branch Isolation**: Made `saleOrders.branchId` NOT NULL to enforce branch isolation at database level
+3. **Sales Branch Isolation**: Made `sales.branchId` NOT NULL to enforce branch isolation at database level
+
+### Performance Enhancements
+1. **Audit Log Pagination**: Implemented pagination on `/api/audit-logs` and `/api/branches/:branchId/audit-logs` endpoints
+   - Query parameters: `offset` (default 0) and `limit` (default 50, max 100)
+   - Response format: `{ logs: AuditLog[], total: number }`
+   - Frontend: Added pagination UI with previous/next navigation buttons
+2. **Frontend Audit Page**: Updated to handle paginated audit logs with pagination controls
