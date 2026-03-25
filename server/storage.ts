@@ -366,7 +366,7 @@ export class DatabaseStorage implements IStorage {
         firstName: userData.firstName || "Usuario",
         lastName: userData.lastName || "Google",
         profileImageUrl: userData.profileImageUrl,
-        role: "admin",
+        role: "vendedor",
         googleId: userData.id,
       })
       .returning();

@@ -88,7 +88,7 @@ export const passwordResetTokens = pgTable("password_reset_tokens", {
 export const auditLogs = pgTable("audit_logs", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id),
-  branchId: varchar("branch_id").references(() => branches.id),
+  branchId: varchar("branch_id").references(() => branches.id, { onDelete: "set null" }),
   userName: text("user_name").notNull(),
   actionType: text("action_type").notNull(),
   entity: text("entity").notNull(),
