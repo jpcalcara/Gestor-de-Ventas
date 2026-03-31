@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, forwardRef } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -106,29 +106,33 @@ interface PasswordInputProps extends React.InputHTMLAttributes<HTMLInputElement>
   "data-testid"?: string;
 }
 
-function PasswordInput({ "data-testid": testId, ...props }: PasswordInputProps) {
-  const [show, setShow] = useState(false);
-  return (
-    <div className="relative">
-      <Input
-        {...props}
-        type={show ? "text" : "password"}
-        data-testid={testId}
-        className="pr-10"
-      />
-      <button
-        type="button"
-        tabIndex={-1}
-        onClick={() => setShow(v => !v)}
-        className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
-        data-testid={testId ? `${testId}-toggle` : undefined}
-        aria-label={show ? "Ocultar contraseña" : "Ver contraseña"}
-      >
-        {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-      </button>
-    </div>
-  );
-}
+const PasswordInput = forwardRef<HTMLInputElement, PasswordInputProps>(
+  ({ "data-testid": testId, className, ...props }, ref) => {
+    const [show, setShow] = useState(false);
+    return (
+      <div className="relative">
+        <Input
+          {...props}
+          ref={ref}
+          type={show ? "text" : "password"}
+          data-testid={testId}
+          className={`pr-10 ${className ?? ""}`}
+        />
+        <button
+          type="button"
+          tabIndex={-1}
+          onClick={() => setShow(v => !v)}
+          className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
+          data-testid={testId ? `${testId}-toggle` : undefined}
+          aria-label={show ? "Ocultar contraseña" : "Ver contraseña"}
+        >
+          {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+        </button>
+      </div>
+    );
+  }
+);
+PasswordInput.displayName = "PasswordInput";
 
 interface CuitInputProps {
   value?: string;

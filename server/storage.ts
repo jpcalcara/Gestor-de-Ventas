@@ -79,6 +79,7 @@ export interface IStorage {
   getUserByEmail(email: string): Promise<User | undefined>;
   getUserByGoogleId(googleId: string): Promise<User | undefined>;
   getUsers(): Promise<User[]>;
+  getUsersForBusiness(businessId: string): Promise<User[]>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, updates: Partial<InsertUser>): Promise<User | undefined>;
   upsertUser(userData: UpsertUser): Promise<User>;
@@ -394,6 +395,30 @@ export class DatabaseStorage implements IStorage {
 
   async getUsers(): Promise<User[]> {
     return await db.select().from(users).orderBy(desc(users.createdAt));
+  }
+
+  async getUsersForBusiness(businessId: string): Promise<User[]> {
+    const businessBranches = await db
+      .select({ id: branches.id })
+      .from(branches)
+      .where(eq(branches.businessId, businessId));
+
+    if (businessBranches.length === 0) return [];
+
+    const branchIds = businessBranches.map(b => b.id);
+    const userBranchRows = await db
+      .select({ userId: userBranches.userId })
+      .from(userBranches)
+      .where(inArray(userBranches.branchId, branchIds));
+
+    if (userBranchRows.length === 0) return [];
+
+    const userIds = [...new Set(userBranchRows.map(r => r.userId))];
+    return await db
+      .select()
+      .from(users)
+      .where(inArray(users.id, userIds))
+      .orderBy(desc(users.createdAt));
   }
 
   async upsertUser(userData: UpsertUser): Promise<User> {

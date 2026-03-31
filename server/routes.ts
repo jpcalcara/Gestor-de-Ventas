@@ -449,20 +449,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const userId = req.session.userId!;
       const userRole = req.session.userRole!;
-      const allUsers = await storage.getUsers();
-      
-      let filteredUsers = allUsers;
-      
+      const businessId = req.session.businessId;
+
+      let filteredUsers;
+
       if (userRole === "sistemas") {
-        // Usuarios sistemas ven a TODOS
-        filteredUsers = allUsers;
-      } else if (userRole === "admin") {
-        // Admins ven usuarios de su negocio (no sistemas)
-        // Filter out sistemas users; admin manages their business users
-        filteredUsers = allUsers.filter(u => u.role !== "sistemas");
+        // sistemas ve a todos los usuarios del sistema
+        filteredUsers = await storage.getUsers();
+      } else if (userRole === "admin" && businessId) {
+        // admin ve solo usuarios de su propio negocio
+        filteredUsers = await storage.getUsersForBusiness(businessId);
       } else if (userRole === "vendedor") {
-        // Vendedores solo se ven a sí mismos
-        filteredUsers = allUsers.filter(u => u.id === userId);
+        // vendedor solo se ve a sí mismo
+        const self = await storage.getUser(userId);
+        filteredUsers = self ? [self] : [];
+      } else {
+        filteredUsers = [];
       }
       
       const safeUsers = filteredUsers.map(u => ({
