@@ -1,13 +1,15 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertSaleSchema, updateSaleSchema, updateCompanySettingsSchema, insertBranchSchema, updateBranchSchema, insertBranchStockSchema, updateUserBranchesSchema } from "@shared/schema";
+import { insertProductSchema, insertSaleSchema, updateSaleSchema, updateCompanySettingsSchema, insertBranchSchema, updateBranchSchema, insertBranchStockSchema, updateUserBranchesSchema, insertInvitationSchema } from "@shared/schema";
 import { fromError } from "zod-validation-error";
 import { registerAuthRoutes, requireAuth, requireAdmin, hashPassword } from "./auth";
+import { generateSlug } from "./utils";
 import { z } from "zod";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
+import crypto from "crypto";
 
 const uploadsDir = path.join(process.cwd(), "uploads");
 if (!fs.existsSync(uploadsDir)) {
@@ -448,9 +450,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // Usuarios sistemas ven a TODOS
         filteredUsers = allUsers;
       } else if (userRole === "admin") {
-        // Admins solo ven a sí mismos por ahora
-        // TODO: Implementar filtrado por createdByUserId cuando la BD esté actualizada
-        filteredUsers = allUsers.filter(u => u.id === userId);
+        // Admins ven usuarios de su negocio (no sistemas)
+        // Filter out sistemas users; admin manages their business users
+        filteredUsers = allUsers.filter(u => u.role !== "sistemas");
       } else if (userRole === "vendedor") {
         // Vendedores solo se ven a sí mismos
         filteredUsers = allUsers.filter(u => u.id === userId);
@@ -682,6 +684,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
       const limit = Math.max(1, Math.min(100, parseInt(req.query.limit as string) || 50));
+      
+      // sistemas sees all; admin sees only their business logs
+      if (req.session.userRole !== "sistemas" && req.session.businessId) {
+        const result = await storage.getAuditLogsByBusiness(req.session.businessId, offset, limit);
+        return res.json(result);
+      }
+      
       const result = await storage.getAuditLogs(offset, limit);
       res.json(result);
     } catch (error: any) {
@@ -689,9 +698,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/company-settings", async (_req: Request, res: Response) => {
+  app.get("/api/company-settings", requireAuth, async (req: Request, res: Response) => {
     try {
-      const settings = await storage.getCompanySettings();
+      const businessId = req.session.businessId;
+      const settings = await storage.getCompanySettings(businessId || undefined);
       res.json(settings);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -706,7 +716,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: validationError.message });
       }
 
-      const settings = await storage.updateCompanySettings(result.data);
+      const businessId = req.session.businessId || undefined;
+      const settings = await storage.updateCompanySettings(result.data, businessId);
       
       await createAuditLog(
         req.session.userId!,
@@ -727,8 +738,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.get("/api/businesses", requireAuth, async (req: Request, res: Response) => {
     try {
-      const businesses = await storage.getBusinesses();
-      res.json(businesses);
+      const userId = req.session.userId!;
+      const userRole = req.session.userRole!;
+      const businessesList = await storage.getBusinessesForUser(userId, userRole);
+      res.json(businessesList);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -747,7 +760,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: validationError.message });
       }
 
-      const business = await storage.createBusiness({ ...result.data, adminUserId: req.session.userId! });
+      // Auto-generate slug from razonSocial if not provided
+      const slug = result.data.slug || generateSlug(result.data.razonSocial);
+      
+      const business = await storage.createBusiness({ ...result.data, slug, adminUserId: req.session.userId! });
       
       await createAuditLog(
         req.session.userId!,
@@ -895,7 +911,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const logoUrl = `/uploads/${req.file.filename}`;
-      const settings = await storage.updateCompanySettings({ logoUrl });
+      const businessId = req.session.businessId || undefined;
+      const settings = await storage.updateCompanySettings({ logoUrl }, businessId);
       
       await createAuditLog(
         req.session.userId!,
@@ -1172,20 +1189,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userRole = req.session.userRole!;
       const userId = req.session.userId!;
       
-      if (userRole === "admin") {
-        const businesses = await storage.getBusinessesForUser(userId);
-        const isMine = businesses.some(b => b.id === businessId);
-        if (!isMine) {
-          return res.status(403).json({ message: "No tiene acceso a este negocio" });
-        }
-      } else if (userRole === "vendedor") {
+      if (userRole === "vendedor") {
         return res.status(403).json({ message: "Los vendedores no pueden cambiar de negocio" });
       }
-
-      const businessesList = await storage.getBusinesses();
-      const business = businessesList.find(b => b.id === businessId);
+      
+      // Verify access
+      const accessible = await storage.getBusinessesForUser(userId, userRole);
+      const business = accessible.find(b => b.id === businessId);
       if (!business) {
-        return res.status(404).json({ message: "Negocio no encontrado" });
+        return res.status(403).json({ message: "No tiene acceso a este negocio" });
+      }
+
+      // Validate business is active
+      if (!business.isActive) {
+        return res.status(403).json({ message: "Este negocio está deshabilitado" });
       }
 
       req.session.businessId = businessId;
@@ -1206,11 +1223,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const branchId = req.session.branchId;
       const branchName = req.session.branchName;
       
-      if (!businessId && req.session.userRole === "admin") {
-        const businesses = await storage.getBusinessesForUser(req.session.userId!);
-        if (businesses.length > 0) {
-          businessId = businesses[0].id;
-          businessName = businesses[0].razonSocial;
+      if (!businessId && req.session.userRole && req.session.userRole !== "vendedor") {
+        const businesses = await storage.getBusinessesForUser(req.session.userId!, req.session.userRole);
+        const active = businesses.filter(b => b.isActive);
+        if (active.length > 0) {
+          businessId = active[0].id;
+          businessName = active[0].razonSocial;
           req.session.businessId = businessId;
           req.session.businessName = businessName;
         }
@@ -1321,6 +1339,166 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const limit = Math.max(1, Math.min(100, parseInt(req.query.limit as string) || 50));
       const result = await storage.getAuditLogsByBranch(req.params.branchId, offset, limit);
       res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Invitation routes
+  app.get("/api/invitations", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const businessId = req.session.businessId;
+      if (!businessId) {
+        return res.status(400).json({ message: "No hay negocio seleccionado" });
+      }
+      const invitationsList = await storage.getInvitationsByBusiness(businessId);
+      res.json(invitationsList);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/invitations", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const businessId = req.session.businessId;
+      if (!businessId) {
+        return res.status(400).json({ message: "No hay negocio seleccionado" });
+      }
+
+      const schema = insertInvitationSchema.pick({ email: true, role: true, branchId: true });
+      const result = schema.safeParse(req.body);
+      if (!result.success) {
+        const validationError = fromError(result.error);
+        return res.status(400).json({ message: validationError.message });
+      }
+
+      const token = crypto.randomBytes(32).toString("hex");
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+      const invitation = await storage.createInvitation({
+        ...result.data,
+        businessId,
+        token,
+        expiresAt,
+      });
+
+      await createAuditLog(
+        req.session.userId!,
+        req.session.userName!,
+        "crear_invitacion",
+        "invitacion",
+        invitation.id,
+        `Invitación creada para: ${invitation.email} (${invitation.role})`
+      );
+
+      res.status(201).json(invitation);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/invitations/:id", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const businessId = req.session.businessId;
+      if (!businessId) {
+        return res.status(400).json({ message: "No hay negocio seleccionado" });
+      }
+
+      // Verify invitation belongs to this business
+      const invitations = await storage.getInvitationsByBusiness(businessId);
+      const invitation = invitations.find(i => i.id === req.params.id);
+      if (!invitation) {
+        return res.status(404).json({ message: "Invitación no encontrada" });
+      }
+
+      await storage.deleteInvitation(req.params.id);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Public invitation accept endpoint (no auth required)
+  app.get("/api/invitations/token/:token", async (req: Request, res: Response) => {
+    try {
+      const invitation = await storage.getInvitationByToken(req.params.token);
+      if (!invitation) {
+        return res.status(404).json({ message: "Invitación no encontrada o ya utilizada" });
+      }
+      if (invitation.usedAt) {
+        return res.status(400).json({ message: "Esta invitación ya fue utilizada" });
+      }
+      if (new Date() > invitation.expiresAt) {
+        return res.status(400).json({ message: "Esta invitación ha expirado" });
+      }
+      
+      // Return limited info for display
+      const business = await storage.getBusiness(invitation.businessId);
+      res.json({
+        id: invitation.id,
+        email: invitation.email,
+        role: invitation.role,
+        businessId: invitation.businessId,
+        businessName: business?.razonSocial || "Empresa",
+        branchId: invitation.branchId,
+        expiresAt: invitation.expiresAt,
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/invitations/token/:token/accept", async (req: Request, res: Response) => {
+    try {
+      const invitation = await storage.getInvitationByToken(req.params.token);
+      if (!invitation) {
+        return res.status(404).json({ message: "Invitación no encontrada" });
+      }
+      if (invitation.usedAt) {
+        return res.status(400).json({ message: "Esta invitación ya fue utilizada" });
+      }
+      if (new Date() > invitation.expiresAt) {
+        return res.status(400).json({ message: "Esta invitación ha expirado" });
+      }
+
+      const { firstName, lastName, password } = req.body;
+      if (!firstName || !lastName || !password) {
+        return res.status(400).json({ message: "Nombre, apellido y contraseña son requeridos" });
+      }
+      if (password.length < 6) {
+        return res.status(400).json({ message: "La contraseña debe tener al menos 6 caracteres" });
+      }
+
+      // Check if user already exists with this email
+      const existing = await storage.getUserByEmail(invitation.email);
+      let user;
+      
+      if (existing) {
+        // Update existing user (they're accepting an invite to a new business)
+        user = existing;
+      } else {
+        const hashedPassword = await hashPassword(password);
+        user = await storage.createUser({
+          email: invitation.email,
+          firstName,
+          lastName,
+          password: hashedPassword,
+          role: invitation.role as "admin" | "vendedor",
+        });
+      }
+
+      // Assign branch if specified
+      if (invitation.branchId) {
+        const currentBranches = await storage.getUserBranches(user.id);
+        const branchIds = currentBranches.map(b => b.branchId);
+        if (!branchIds.includes(invitation.branchId)) {
+          await storage.setUserBranches(user.id, [...branchIds, invitation.branchId]);
+        }
+      }
+
+      await storage.markInvitationUsed(invitation.id);
+
+      res.json({ success: true, message: "Cuenta creada exitosamente. Puede iniciar sesión." });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

@@ -3,7 +3,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Pencil, Trash2, Phone, Mail, User, Power, Shield, ShieldCheck, UserCog, Building2 } from "lucide-react";
+import { Plus, Pencil, Trash2, Phone, Mail, User, Power, Shield, ShieldCheck, UserCog, Building2, Send, Link2, X, Clock } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -39,6 +39,31 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+
+interface InvitationData {
+  id: string;
+  email: string;
+  role: string;
+  branchId?: string | null;
+  businessId: string;
+  token: string;
+  usedAt?: string | null;
+  expiresAt: string;
+  createdAt: string;
+}
+
+const inviteFormSchema = z.object({
+  email: z.string().email("Email inválido"),
+  role: z.enum(["admin", "vendedor"]).default("vendedor"),
+  branchId: z.string().optional(),
+});
 
 interface UserData {
   id: string;
@@ -85,6 +110,8 @@ export default function UsersPage() {
   const [deletingUser, setDeletingUser] = useState<UserData | null>(null);
   const [assigningBranchesUser, setAssigningBranchesUser] = useState<UserData | null>(null);
   const [selectedBranchIds, setSelectedBranchIds] = useState<string[]>([]);
+  const [isInviteDialogOpen, setIsInviteDialogOpen] = useState(false);
+  const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
   const isSistemas = currentUser?.role === "sistemas";
 
@@ -95,8 +122,52 @@ export default function UsersPage() {
 
   const { data: allBranches = [] } = useQuery<BranchData[]>({
     queryKey: ["/api/branches"],
-    enabled: isSistemas,
   });
+
+  const { data: invitations = [] } = useQuery<InvitationData[]>({
+    queryKey: ["/api/invitations"],
+    enabled: isAdmin && !isSistemas,
+  });
+
+  const inviteForm = useForm<z.infer<typeof inviteFormSchema>>({
+    resolver: zodResolver(inviteFormSchema),
+    defaultValues: { email: "", role: "vendedor", branchId: undefined },
+  });
+
+  const createInvitationMutation = useMutation({
+    mutationFn: async (data: z.infer<typeof inviteFormSchema>) => {
+      return await apiRequest("POST", "/api/invitations", data);
+    },
+    onSuccess: () => {
+      toast({ title: "Invitación creada", description: "El enlace de invitación ha sido generado" });
+      queryClient.invalidateQueries({ queryKey: ["/api/invitations"] });
+      inviteForm.reset({ email: "", role: "vendedor", branchId: undefined });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const deleteInvitationMutation = useMutation({
+    mutationFn: async (id: string) => {
+      return await apiRequest("DELETE", `/api/invitations/${id}`, undefined);
+    },
+    onSuccess: () => {
+      toast({ title: "Invitación eliminada" });
+      queryClient.invalidateQueries({ queryKey: ["/api/invitations"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const copyInviteLink = (token: string) => {
+    const url = `${window.location.origin}/invite/${token}`;
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedToken(token);
+      setTimeout(() => setCopiedToken(null), 2000);
+    });
+  };
 
   const { data: userBranchData } = useQuery<{ branchIds: string[] }>({
     queryKey: ["/api/users", assigningBranchesUser?.id, "branches"],
@@ -270,20 +341,27 @@ export default function UsersPage() {
 
   return (
     <div className="container mx-auto px-4 md:px-8 py-6">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between gap-4 mb-6 flex-wrap">
         <div>
           <h1 className="text-2xl font-semibold">Gestión de Usuarios</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Administra los usuarios del sistema
           </p>
         </div>
-        <Dialog open={isDialogOpen || !!editingUser} onOpenChange={(open) => {
-          if (!open) {
-            setIsDialogOpen(false);
-            setEditingUser(null);
-            form.reset();
-          }
-        }}>
+        <div className="flex items-center gap-2">
+          {!isSistemas && (
+            <Button variant="outline" onClick={() => setIsInviteDialogOpen(true)} data-testid="button-invite-user">
+              <Send className="h-4 w-4 mr-2" />
+              Invitar
+            </Button>
+          )}
+          <Dialog open={isDialogOpen || !!editingUser} onOpenChange={(open) => {
+            if (!open) {
+              setIsDialogOpen(false);
+              setEditingUser(null);
+              form.reset();
+            }
+          }}>
           <DialogTrigger asChild>
             <Button onClick={openCreateDialog} data-testid="button-add-user">
               <Plus className="h-4 w-4 mr-2" />
@@ -421,7 +499,8 @@ export default function UsersPage() {
               </form>
             </Form>
           </DialogContent>
-        </Dialog>
+          </Dialog>
+        </div>
       </div>
 
       {isLoading ? (
@@ -670,6 +749,117 @@ export default function UsersPage() {
               {assignBranchesMutation.isPending ? "Guardando..." : "Guardar"}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Invite dialog */}
+      <Dialog open={isInviteDialogOpen} onOpenChange={setIsInviteDialogOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Invitar Usuario</DialogTitle>
+          </DialogHeader>
+          <Form {...inviteForm}>
+            <form onSubmit={inviteForm.handleSubmit((d) => createInvitationMutation.mutate(d))} className="space-y-4">
+              <FormField
+                control={inviteForm.control}
+                name="email"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Email</FormLabel>
+                    <FormControl>
+                      <Input type="email" placeholder="usuario@email.com" {...field} data-testid="input-invite-email" />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={inviteForm.control}
+                name="role"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Rol</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-invite-role">
+                          <SelectValue placeholder="Seleccionar rol" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        <SelectItem value="vendedor">Vendedor</SelectItem>
+                        <SelectItem value="admin">Administrador</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={inviteForm.control}
+                name="branchId"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Sucursal (opcional)</FormLabel>
+                    <Select onValueChange={field.onChange} defaultValue={field.value}>
+                      <FormControl>
+                        <SelectTrigger data-testid="select-invite-branch">
+                          <SelectValue placeholder="Sin asignar a sucursal" />
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {allBranches.map(b => (
+                          <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <Button type="submit" disabled={createInvitationMutation.isPending} data-testid="button-create-invitation">
+                {createInvitationMutation.isPending ? "Generando..." : "Generar Invitación"}
+              </Button>
+            </form>
+          </Form>
+
+          {invitations.length > 0 && (
+            <div className="mt-6">
+              <h3 className="text-sm font-medium mb-3">Invitaciones Pendientes</h3>
+              <div className="space-y-2">
+                {invitations.filter(i => !i.usedAt && new Date(i.expiresAt) > new Date()).map(inv => (
+                  <div key={inv.id} className="flex items-center justify-between gap-2 p-2 rounded-md border text-sm">
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium truncate">{inv.email}</p>
+                      <p className="text-xs text-muted-foreground flex items-center gap-1">
+                        <Clock className="h-3 w-3" />
+                        Expira {new Date(inv.expiresAt).toLocaleDateString("es-AR")}
+                        {" · "}{inv.role}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => copyInviteLink(inv.token)}
+                        title={copiedToken === inv.token ? "¡Copiado!" : "Copiar enlace"}
+                        data-testid={`button-copy-invite-${inv.id}`}
+                      >
+                        <Link2 className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        onClick={() => deleteInvitationMutation.mutate(inv.id)}
+                        data-testid={`button-delete-invite-${inv.id}`}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
     </div>

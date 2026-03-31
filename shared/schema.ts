@@ -389,7 +389,7 @@ export const insertBusinessSchema = createInsertSchema(businesses).omit({
   adminUserId: true,
 }).extend({
   razonSocial: z.string().min(1, "La razón social es requerida"),
-  slug: z.string().min(1, "El slug es requerido").regex(/^[a-z0-9-]+$/, "El slug solo puede contener letras minúsculas, números y guiones"),
+  slug: z.string().min(1).regex(/^[a-z0-9-]+$/, "El slug solo puede contener letras minúsculas, números y guiones").optional(),
   plan: z.enum(["free", "starter", "pro"]).default("free"),
   cuit: z.string().optional().or(z.literal("")).nullable(),
   encargado: z.string().optional().or(z.literal("")).nullable(),

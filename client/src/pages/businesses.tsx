@@ -3,11 +3,12 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Pencil, Trash2, Mail, Phone, Users } from "lucide-react";
+import { Plus, Pencil, Trash2, Mail, Phone, Users, Globe, Building2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
@@ -28,6 +29,13 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -41,6 +49,8 @@ import {
 interface BusinessData {
   id: string;
   razonSocial: string;
+  slug?: string | null;
+  plan: "free" | "starter" | "pro";
   cuit?: string;
   encargado?: string;
   telefono?: string;
@@ -48,6 +58,12 @@ interface BusinessData {
   isActive: boolean;
   createdAt: string;
 }
+
+const planLabels: Record<string, { label: string; variant: "secondary" | "default" | "outline" }> = {
+  free: { label: "Free", variant: "secondary" },
+  starter: { label: "Starter", variant: "default" },
+  pro: { label: "Pro", variant: "outline" },
+};
 
 interface User {
   id: string;
@@ -58,6 +74,7 @@ interface User {
 
 const businessFormSchema = z.object({
   razonSocial: z.string().min(1, "La razón social es requerida"),
+  plan: z.enum(["free", "starter", "pro"]).default("free"),
   cuit: z.string().optional().or(z.literal("")).nullable(),
   encargado: z.string().optional().or(z.literal("")).nullable(),
   telefono: z.string().optional().or(z.literal("")).nullable(),
@@ -87,7 +104,7 @@ export default function BusinessesPage() {
     enabled: isSistemas,
   });
 
-  const { data: businessAdmins = [] } = useQuery({
+  const { data: businessAdmins = [] } = useQuery<{ userId: string; businessId: string }[]>({
     queryKey: ["/api/businesses", managingAdmins?.id, "admins"],
     enabled: !!managingAdmins,
   });
@@ -114,6 +131,7 @@ export default function BusinessesPage() {
     resolver: zodResolver(businessFormSchema),
     defaultValues: {
       razonSocial: "",
+      plan: "free",
       cuit: null,
       encargado: null,
       telefono: null,
@@ -181,6 +199,7 @@ export default function BusinessesPage() {
     setEditingBusiness(business);
     form.reset({
       razonSocial: business.razonSocial,
+      plan: business.plan || "free",
       cuit: business.cuit || null,
       encargado: business.encargado || null,
       telefono: business.telefono || null,
@@ -280,6 +299,28 @@ export default function BusinessesPage() {
                           data-testid="input-razon-social"
                         />
                       </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={form.control}
+                  name="plan"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Plan</FormLabel>
+                      <Select onValueChange={field.onChange} defaultValue={field.value}>
+                        <FormControl>
+                          <SelectTrigger data-testid="select-plan">
+                            <SelectValue placeholder="Seleccionar plan" />
+                          </SelectTrigger>
+                        </FormControl>
+                        <SelectContent>
+                          <SelectItem value="free">Free</SelectItem>
+                          <SelectItem value="starter">Starter</SelectItem>
+                          <SelectItem value="pro">Pro</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -422,17 +463,28 @@ export default function BusinessesPage() {
       ) : (
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
           {businesses.map((business) => (
-            <Card key={business.id} data-testid={`card-business-${business.id}`}>
+            <Card key={business.id} data-testid={`card-business-${business.id}`} className={!business.isActive ? "opacity-60" : ""}>
               <CardHeader className="pb-3">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <CardTitle className="text-lg">{business.razonSocial}</CardTitle>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <CardTitle className="text-lg truncate">{business.razonSocial}</CardTitle>
+                    {business.slug && (
+                      <p className="text-xs text-muted-foreground flex items-center gap-1 mt-1">
+                        <Globe className="h-3 w-3" />
+                        {business.slug}
+                      </p>
+                    )}
                   </div>
-                  {business.isActive && (
-                    <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded">
-                      Activo
-                    </span>
-                  )}
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <Badge variant={business.isActive ? "default" : "secondary"} className="text-xs">
+                      {business.isActive ? "Activo" : "Inactivo"}
+                    </Badge>
+                    {business.plan && (
+                      <Badge variant={planLabels[business.plan]?.variant || "secondary"} className="text-xs">
+                        {planLabels[business.plan]?.label || business.plan}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-2">
@@ -442,8 +494,9 @@ export default function BusinessesPage() {
                   </p>
                 )}
                 {business.encargado && (
-                  <p className="text-sm text-muted-foreground">
-                    <strong>Encargado:</strong> {business.encargado}
+                  <p className="text-sm text-muted-foreground flex items-center gap-1">
+                    <Building2 className="h-4 w-4" />
+                    {business.encargado}
                   </p>
                 )}
                 {business.telefono && (

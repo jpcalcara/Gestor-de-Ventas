@@ -28,6 +28,8 @@ import {
   type BranchStockWithProduct,
   type UserBranch,
   type UserWithBranches,
+  type Invitation,
+  type InsertInvitation,
   products,
   sales,
   saleOrders,
@@ -40,10 +42,11 @@ import {
   branches,
   branchStocks,
   userBranches,
+  invitations,
   updateSaleSchema,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, sql, and, or } from "drizzle-orm";
+import { eq, desc, sql, and, or, inArray } from "drizzle-orm";
 
 export interface IStorage {
   getProducts(branchId?: string): Promise<Product[]>;
@@ -76,14 +79,16 @@ export interface IStorage {
   getPasswordResetToken(token: string): Promise<PasswordResetToken | undefined>;
   markPasswordResetTokenUsed(id: string): Promise<void>;
   
-  getCompanySettings(): Promise<CompanySettings>;
-  updateCompanySettings(updates: UpdateCompanySettings): Promise<CompanySettings>;
+  getCompanySettings(businessId?: string): Promise<CompanySettings>;
+  updateCompanySettings(updates: UpdateCompanySettings, businessId?: string): Promise<CompanySettings>;
+  getOrCreateCompanySettings(businessId: string, defaultName?: string): Promise<CompanySettings>;
   
-  getBusinesses(): Promise<Business[]>;
-  getBusinessesForUser(userId: string): Promise<Business[]>;
+  getBusiness(id: string): Promise<Business | undefined>;
+  getBusinesses(includeInactive?: boolean): Promise<Business[]>;
+  getBusinessesForUser(userId: string, role?: string): Promise<Business[]>;
   getBusinessAdmins(businessId: string): Promise<BusinessAdmin[]>;
   setBusinessAdmins(businessId: string, userIds: string[]): Promise<void>;
-  getBranches(): Promise<Branch[]>;
+  getBranches(businessId?: string): Promise<Branch[]>;
   getBranchesForBusiness(businessId: string): Promise<Branch[]>;
   getBranch(id: string): Promise<Branch | undefined>;
   createBranch(branch: InsertBranch & { businessId: string }): Promise<Branch>;
@@ -100,6 +105,13 @@ export interface IStorage {
   createSaleOrderForBranch(order: InsertSaleOrder & { userId: string; branchId: string }): Promise<SaleOrder>;
   
   getAuditLogsByBranch(branchId: string, offset?: number, limit?: number): Promise<{ logs: AuditLog[]; total: number } | AuditLog[]>;
+  getAuditLogsByBusiness(businessId: string, offset?: number, limit?: number): Promise<{ logs: AuditLog[]; total: number }>;
+  
+  createInvitation(data: InsertInvitation & { businessId: string; token: string; expiresAt: Date }): Promise<Invitation>;
+  getInvitationByToken(token: string): Promise<Invitation | undefined>;
+  markInvitationUsed(id: string): Promise<void>;
+  getInvitationsByBusiness(businessId: string): Promise<Invitation[]>;
+  deleteInvitation(id: string): Promise<boolean>;
   
   getUserBranches(userId: string): Promise<UserBranch[]>;
   getBranchesForUser(userId: string, role: string): Promise<Branch[]>;
@@ -429,8 +441,11 @@ export class DatabaseStorage implements IStorage {
       .where(eq(passwordResetTokens.id, id));
   }
 
-  async getCompanySettings(): Promise<CompanySettings> {
-    const [settings] = await db.select().from(companySettings);
+  async getCompanySettings(businessId?: string): Promise<CompanySettings> {
+    if (businessId) {
+      return await this.getOrCreateCompanySettings(businessId);
+    }
+    const [settings] = await db.select().from(companySettings).where(sql`${companySettings.businessId} IS NULL`);
     if (settings) return settings;
     
     const [newSettings] = await db
@@ -440,8 +455,25 @@ export class DatabaseStorage implements IStorage {
     return newSettings;
   }
 
-  async updateCompanySettings(updates: UpdateCompanySettings): Promise<CompanySettings> {
-    const current = await this.getCompanySettings();
+  async getOrCreateCompanySettings(businessId: string, defaultName?: string): Promise<CompanySettings> {
+    const [settings] = await db.select().from(companySettings).where(eq(companySettings.businessId, businessId));
+    if (settings) return settings;
+    
+    const business = await this.getBusiness(businessId);
+    const [newSettings] = await db
+      .insert(companySettings)
+      .values({ 
+        businessId,
+        companyName: defaultName || business?.razonSocial || "Mi Empresa",
+      })
+      .returning();
+    return newSettings;
+  }
+
+  async updateCompanySettings(updates: UpdateCompanySettings, businessId?: string): Promise<CompanySettings> {
+    const current = businessId 
+      ? await this.getOrCreateCompanySettings(businessId)
+      : await this.getCompanySettings();
     const [updated] = await db
       .update(companySettings)
       .set({ ...updates, updatedAt: new Date() })
@@ -450,11 +482,23 @@ export class DatabaseStorage implements IStorage {
     return updated;
   }
 
-  async getBusinesses(): Promise<Business[]> {
-    return await db.select().from(businesses).where(eq(businesses.isActive, true));
+  async getBusiness(id: string): Promise<Business | undefined> {
+    const [business] = await db.select().from(businesses).where(eq(businesses.id, id));
+    return business || undefined;
   }
 
-  async getBusinessesForUser(userId: string): Promise<Business[]> {
+  async getBusinesses(includeInactive = false): Promise<Business[]> {
+    if (includeInactive) {
+      return await db.select().from(businesses).orderBy(businesses.razonSocial);
+    }
+    return await db.select().from(businesses).where(eq(businesses.isActive, true)).orderBy(businesses.razonSocial);
+  }
+
+  async getBusinessesForUser(userId: string, role?: string): Promise<Business[]> {
+    if (role === "sistemas") {
+      return await this.getBusinesses(true);
+    }
+    
     const businessIds = await db
       .selectDistinct({ id: businessAdmins.businessId })
       .from(businessAdmins)
@@ -466,7 +510,7 @@ export class DatabaseStorage implements IStorage {
       and(
         or(
           eq(businesses.adminUserId, userId),
-          adminBizIds.length > 0 ? sql`${businesses.id} in (${sql.join(adminBizIds)})` : sql`false`
+          adminBizIds.length > 0 ? inArray(businesses.id, adminBizIds) : sql`false`
         ),
         eq(businesses.isActive, true)
       )
@@ -512,7 +556,10 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
-  async getBranches(): Promise<Branch[]> {
+  async getBranches(businessId?: string): Promise<Branch[]> {
+    if (businessId) {
+      return await db.select().from(branches).where(eq(branches.businessId, businessId)).orderBy(branches.number);
+    }
     return await db.select().from(branches).orderBy(branches.number);
   }
 
@@ -753,6 +800,60 @@ export class DatabaseStorage implements IStorage {
       .limit(limit)
       .offset(offset);
     return { logs, total: count };
+  }
+
+  async getAuditLogsByBusiness(businessId: string, offset: number = 0, limit: number = 50): Promise<{ logs: AuditLog[]; total: number }> {
+    // Get all branch IDs for this business
+    const businessBranches = await db.select({ id: branches.id }).from(branches).where(eq(branches.businessId, businessId));
+    const branchIds = businessBranches.map(b => b.id);
+    
+    if (branchIds.length === 0) {
+      return { logs: [], total: 0 };
+    }
+    
+    const [{ count }] = await db.select({ count: sql`count(*)`.mapWith(Number) }).from(auditLogs)
+      .where(inArray(auditLogs.branchId, branchIds));
+    const logs = await db
+      .select()
+      .from(auditLogs)
+      .where(inArray(auditLogs.branchId, branchIds))
+      .orderBy(desc(auditLogs.createdAt))
+      .limit(limit)
+      .offset(offset);
+    return { logs, total: count };
+  }
+
+  async createInvitation(data: InsertInvitation & { businessId: string; token: string; expiresAt: Date }): Promise<Invitation> {
+    const [invitation] = await db
+      .insert(invitations)
+      .values({
+        email: data.email,
+        businessId: data.businessId,
+        branchId: data.branchId || null,
+        role: data.role || "vendedor",
+        token: data.token,
+        expiresAt: data.expiresAt,
+      })
+      .returning();
+    return invitation;
+  }
+
+  async getInvitationByToken(token: string): Promise<Invitation | undefined> {
+    const [invitation] = await db.select().from(invitations).where(eq(invitations.token, token));
+    return invitation || undefined;
+  }
+
+  async markInvitationUsed(id: string): Promise<void> {
+    await db.update(invitations).set({ usedAt: new Date() }).where(eq(invitations.id, id));
+  }
+
+  async getInvitationsByBusiness(businessId: string): Promise<Invitation[]> {
+    return await db.select().from(invitations).where(eq(invitations.businessId, businessId)).orderBy(desc(invitations.createdAt));
+  }
+
+  async deleteInvitation(id: string): Promise<boolean> {
+    const result = await db.delete(invitations).where(eq(invitations.id, id));
+    return result.rowCount !== null && result.rowCount > 0;
   }
 
   async getUserBranches(userId: string): Promise<UserBranch[]> {

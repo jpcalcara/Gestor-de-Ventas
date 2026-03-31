@@ -16,6 +16,7 @@ import BranchesPage from "@/pages/branches";
 import SettingsPage from "@/pages/settings";
 import AuditPage from "@/pages/audit";
 import LoginPage from "@/pages/login";
+import InvitePage from "@/pages/invite";
 import NotFound from "@/pages/not-found";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -82,6 +83,7 @@ function Router() {
       <Route path="/login">
         <RedirectIfAuthenticated component={LoginPage} />
       </Route>
+      <Route path="/invite/:token" component={InvitePage} />
       <Route path="/">
         <ProtectedRoute component={SalesPage} />
       </Route>
