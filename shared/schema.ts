@@ -101,6 +101,7 @@ export const auditLogs = pgTable("audit_logs", {
 
 export const companySettings = pgTable("company_settings", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessId: varchar("business_id").references(() => businesses.id, { onDelete: "cascade" }),
   companyName: text("company_name").notNull().default("JOTA Sistemas"),
   logoUrl: text("logo_url"),
   updatedAt: timestamp("updated_at").defaultNow(),
@@ -109,6 +110,8 @@ export const companySettings = pgTable("company_settings", {
 export const businesses = pgTable("businesses", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   razonSocial: text("razon_social").notNull().unique(),
+  slug: text("slug").unique(),
+  plan: text("plan").notNull().default("free"),
   cuit: text("cuit").unique(),
   encargado: text("encargado"),
   telefono: text("telefono"),
@@ -150,6 +153,18 @@ export const userBranches = pgTable("user_branches", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   branchId: varchar("branch_id").notNull().references(() => branches.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const invitations = pgTable("invitations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").notNull(),
+  businessId: varchar("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+  branchId: varchar("branch_id").references(() => branches.id, { onDelete: "set null" }),
+  role: text("role").notNull().default("vendedor"),
+  token: text("token").notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -374,6 +389,8 @@ export const insertBusinessSchema = createInsertSchema(businesses).omit({
   adminUserId: true,
 }).extend({
   razonSocial: z.string().min(1, "La razón social es requerida"),
+  slug: z.string().min(1, "El slug es requerido").regex(/^[a-z0-9-]+$/, "El slug solo puede contener letras minúsculas, números y guiones"),
+  plan: z.enum(["free", "starter", "pro"]).default("free"),
   cuit: z.string().optional().or(z.literal("")).nullable(),
   encargado: z.string().optional().or(z.literal("")).nullable(),
   telefono: z.string().optional().or(z.literal("")).nullable(),
@@ -383,6 +400,8 @@ export const insertBusinessSchema = createInsertSchema(businesses).omit({
 
 export const updateBusinessSchema = z.object({
   razonSocial: z.string().min(1, "La razón social es requerida").optional(),
+  slug: z.string().min(1).regex(/^[a-z0-9-]+$/).optional(),
+  plan: z.enum(["free", "starter", "pro"]).optional(),
   cuit: z.string().optional().nullable(),
   encargado: z.string().optional().nullable(),
   telefono: z.string().optional().nullable(),
@@ -479,3 +498,18 @@ export type UpdateUserBranches = z.infer<typeof updateUserBranchesSchema>;
 export type UserWithBranches = User & {
   userBranches?: (UserBranch & { branch?: Branch })[];
 };
+
+export const insertInvitationSchema = createInsertSchema(invitations).omit({
+  id: true,
+  token: true,
+  expiresAt: true,
+  usedAt: true,
+  createdAt: true,
+}).extend({
+  email: z.string().email("Email inválido"),
+  role: z.enum(["admin", "vendedor"]).default("vendedor"),
+  branchId: z.string().optional().nullable(),
+});
+
+export type Invitation = typeof invitations.$inferSelect;
+export type InsertInvitation = z.infer<typeof insertInvitationSchema>;

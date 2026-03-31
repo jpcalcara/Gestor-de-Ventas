@@ -1,0 +1,256 @@
+### Estructura de roles actual
+- `sistemas` → superadmin global (accede a todo)
+- `admin` → administrador de sucursal/negocio
+- `vendedor` → solo crea y edita ventas
+ 
+### Lo que ya existe y funciona bien (NO tocar)
+- Aislamiento de datos por sucursal (`branchId` como FK en productos, ventas, audit logs)
+- Tabla `businesses` con campos: `id`, `razonSocial`, `cuit`, `encargado`, `telefono`, `mail`, `adminUserId`, `isActive`
+- Tabla `branches` con FK a `businesses`
+- Tabla `businessAdmins` (relación many-to-many usuarios-negocios)
+- Tabla `userBranches` (relación many-to-many usuarios-sucursales)
+- Middlewares `requireAuth`, `requireAdmin`, `requireSistemas` en `server/auth.ts`
+- La sesión ya guarda: `userId`, `userEmail`, `userName`, `userRole`, `businessId`, `businessName`, `branchId`, `branchName`
+ 
+---
+ 
+## Objetivo
+ 
+Quiero que el sistema funcione como un **SaaS multitenant real**, donde cada negocio (tenant) está completamente aislado de los demás. Un negocio no puede ver ni acceder a los datos de otro negocio bajo ninguna circunstancia. El usuario `sistemas` es el único con visibilidad global.
+ 
+---
+ 
+## Cambios requeridos — implementar en orden
+ 
+### CAMBIO 1: Agregar `slug` y `plan` a la tabla `businesses`
+ 
+En `shared/schema.ts`, agregar las siguientes columnas a la tabla `businesses`:
+ 
+```typescript
+slug: text("slug").notNull().unique(),  // identificador URL-friendly: "pizzaroma", "kiosco-sur"
+plan: text("plan").notNull().default("free"), // "free" | "starter" | "pro"
+```
+ 
+Generar y ejecutar la migración con Drizzle. El `slug` debe generarse automáticamente a partir del `razonSocial` al crear un negocio (convertir a minúsculas, reemplazar espacios por guiones, eliminar caracteres especiales). Agregar función helper `generateSlug(text: string): string` en `server/utils.ts`.
+ 
+---
+ 
+### CAMBIO 2: Aislar `companySettings` por negocio
+ 
+Actualmente existe una única fila de `companySettings` global. Esto está mal para multitenancy: cada negocio debe tener su propia configuración (nombre de empresa, logo, etc.).
+ 
+**En `shared/schema.ts`**, agregar a la tabla `companySettings`:
+```typescript
+businessId: varchar("business_id").references(() => businesses.id, { onDelete: "cascade" }),
+```
+ 
+**En `server/storage.ts`** (o donde estén los métodos de storage), modificar los métodos:
+- `getCompanySettings()` → pasar a `getCompanySettings(businessId: string)` y filtrar por `businessId`
+- `updateCompanySettings(data)` → pasar a `updateCompanySettings(businessId: string, data)` y filtrar por `businessId`
+- Agregar `getOrCreateCompanySettings(businessId: string)`: si no existe una fila para ese `businessId`, crearla con valores default usando el `razonSocial` del negocio como nombre inicial
+ 
+**En `server/routes.ts`**, modificar los endpoints:
+- `GET /api/company-settings` → usar `req.session.businessId` para filtrar
+- `PATCH /api/company-settings` → usar `req.session.businessId` para actualizar solo la config del negocio en sesión
+ 
+**En el frontend** (`client/src/`), no hace falta cambiar nada porque la API ya devuelve la config correcta según la sesión.
+ 
+---
+ 
+### CAMBIO 3: Sistema de invitaciones de usuarios por negocio
+ 
+Actualmente solo el rol `sistemas` puede crear usuarios. Se necesita que el `admin` de cada negocio pueda invitar usuarios a su propio negocio mediante un sistema de invitaciones por email.
+ 
+**En `shared/schema.ts`**, crear la nueva tabla:
+ 
+```typescript
+export const invitations = pgTable("invitations", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  email: text("email").notNull(),
+  businessId: varchar("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+  branchId: varchar("branch_id").references(() => branches.id, { onDelete: "set null" }),
+  role: text("role").notNull().default("vendedor"), // "admin" | "vendedor"
+  token: text("token").notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+```
+ 
+**Agregar los Zod schemas** correspondientes (`insertInvitationSchema`, etc.) en `shared/schema.ts`.
+ 
+**En `server/storage.ts`**, agregar métodos:
+- `createInvitation(data)`
+- `getInvitationByToken(token: string)`
+- `markInvitationUsed(id: string)`
+- `getInvitationsByBusiness(businessId: string)`
+ 
+**En `server/routes.ts`**, agregar los endpoints:
+ 
+```
+POST /api/invitations
+  - requireAdmin
+  - Solo puede invitar a su propio negocio (usar req.session.businessId)
+  - Rol `sistemas` puede invitar a cualquier negocio
+  - Genera token único (usar nanoid o crypto.randomUUID)
+  - expiresAt = 72 horas desde ahora
+  - Responde con la invitación creada (incluyendo el token para mostrar el link)
+ 
+GET /api/invitations
+  - requireAdmin
+  - Devuelve todas las invitaciones del negocio en sesión
+  - rol `sistemas` ve todas
+ 
+DELETE /api/invitations/:id
+  - requireAdmin
+  - Solo puede borrar invitaciones de su propio negocio
+ 
+GET /api/invitations/accept/:token  (endpoint público, sin requireAuth)
+  - Busca la invitación por token
+  - Verifica que no esté usada y no haya expirado
+  - Devuelve los datos de la invitación (email, businessId, role) para pre-llenar el formulario de registro
+ 
+POST /api/invitations/accept/:token  (endpoint público, sin requireAuth)
+  - Recibe: firstName, lastName, password
+  - Valida el token igual que arriba
+  - Crea el usuario con los datos
+  - Asigna el usuario al negocio via businessAdmins (si role = "admin") o userBranches (si role = "vendedor" y hay branchId)
+  - Marca la invitación como usada (usedAt = now)
+  - Inicia sesión automáticamente
+```
+ 
+**En el frontend**, agregar:
+- Página pública `/invite/:token` que muestre el formulario de registro pre-llenado con el email de la invitación
+- En la página de Usuarios (`client/src/pages/users.tsx`), agregar botón "Invitar usuario" visible para `admin` que abra un dialog con: campo email, selector de rol (`admin`/`vendedor`), selector de sucursal (si es vendedor). Al enviar, llama a `POST /api/invitations` y muestra el link generado para copiar.
+ 
+---
+ 
+### CAMBIO 4: Aislamiento total por `businessId` en todos los endpoints
+ 
+Revisar **todos** los endpoints en `server/routes.ts` y asegurarse de que ningún `admin` o `vendedor` pueda acceder a datos de otro negocio. Las reglas son:
+ 
+**Para rol `sistemas`**: puede ver y operar sobre todo sin filtro por negocio.
+ 
+**Para rol `admin` y `vendedor`**: cada consulta debe filtrar por `req.session.businessId`. Si `req.session.businessId` está vacío para estos roles, devolver 403.
+ 
+Los endpoints a revisar y corregir específicamente:
+ 
+- `GET /api/businesses` → si es `admin`, devolver solo el negocio propio. Si es `sistemas`, devolver todos.
+- `GET /api/branches` → si es `admin` o `vendedor`, filtrar por `req.session.businessId`
+- `GET /api/users` → si es `admin`, devolver solo usuarios que pertenezcan a su mismo negocio (via `businessAdmins` o `userBranches` en alguna sucursal del negocio)
+- `GET /api/audit-logs` → ya filtra por sucursal, pero agregar validación que la sucursal pertenezca al negocio en sesión
+- `GET /api/products` → ya filtra por `branchId`, verificar que el `branchId` pertenece al negocio en sesión antes de devolver datos
+ 
+**Agregar un helper en `server/auth.ts`**:
+ 
+```typescript
+// Verifica que un branchId pertenezca al negocio en sesión
+export async function validateBranchBelongsToBusiness(
+  branchId: string,
+  businessId: string
+): Promise<boolean> {
+  const branch = await storage.getBranch(branchId);
+  return branch?.businessId === businessId;
+}
+```
+ 
+Usar este helper en cualquier endpoint donde se reciba un `branchId` por parámetro o body.
+ 
+---
+ 
+### CAMBIO 5: Agregar `businessId` como filtro en audit logs y reportes
+ 
+En `server/storage.ts`, modificar:
+- `getAuditLogsByBranch(branchId, options)` → agregar validación opcional por `businessId` para que `sistemas` pueda filtrar por negocio completo
+- Agregar `getAuditLogsByBusiness(businessId, options)` → devuelve logs de todas las sucursales de ese negocio
+ 
+En `server/routes.ts`:
+- `GET /api/audit-logs` → si el rol es `sistemas` y no hay `branchId` en sesión, devolver todos. Si hay `businessId` en sesión (rol `admin`), filtrar por negocio completo usando el nuevo método.
+ 
+---
+ 
+### CAMBIO 6: Vista de negocios mejorada para el rol `sistemas`
+ 
+En el frontend, la página `client/src/pages/businesses.tsx` debe mostrar para el rol `sistemas`:
+ 
+- Listado de todos los negocios con: nombre, CUIT, plan, cantidad de sucursales, estado (activo/inactivo)
+- Al crear un negocio, el campo `slug` debe generarse automáticamente desde el nombre pero ser editable
+- Mostrar el `slug` en la tarjeta del negocio (es el identificador único del tenant)
+- Selector de `plan` al crear/editar: "Free", "Starter", "Pro"
+- Botón "Ver como este negocio" (solo para `sistemas`): permite a `sistemas` seleccionar un negocio y operar desde su contexto sin cambiar su rol real
+ 
+---
+ 
+### CAMBIO 7: Página de configuración de cuenta por negocio
+ 
+Modificar `client/src/pages/settings.tsx` para que el `admin` de un negocio pueda editar:
+- Nombre de la empresa (guarda en `companySettings.companyName` de su negocio)
+- Logo (guarda en `companySettings.logoUrl` de su negocio)
+- Datos del negocio: teléfono, mail, encargado (guarda en `businesses`)
+ 
+El `admin` **no puede** editar: `razonSocial`, `cuit`, `slug`, `plan` (esos solo los puede editar `sistemas`).
+ 
+---
+ 
+### CAMBIO 8: Validación en login que el negocio esté activo
+ 
+En `server/routes.ts` o `server/auth.ts`, en el endpoint `POST /api/auth/login`, después de validar el usuario, agregar:
+ 
+```typescript
+// Verificar que el negocio del usuario esté activo
+if (user.role !== "sistemas") {
+  const userBusinesses = await storage.getBusinessesForUser(user.id, user.role);
+  const allInactive = userBusinesses.every(b => !b.isActive);
+  if (allInactive && userBusinesses.length > 0) {
+    return res.status(403).json({ 
+      message: "Tu negocio está deshabilitado. Contactá al administrador del sistema." 
+    });
+  }
+}
+```
+ 
+Agregar en `server/storage.ts` el método `getBusinessesForUser(userId, role)` que devuelva los negocios a los que pertenece el usuario.
+ 
+---
+ 
+## Restricciones importantes
+ 
+1. **No romper el aislamiento por sucursal que ya existe**. El `branchId` en sesión sigue siendo necesario y funcional. El `businessId` es una capa adicional encima.
+ 
+2. **No modificar el flujo de selección de sucursal** que ya funciona en el frontend (el selector de sucursal al iniciar sesión). Solo asegurarse de que al seleccionar sucursal se valide que pertenece al negocio en sesión.
+ 
+3. **No cambiar el sistema de roles**. Los roles `sistemas`, `admin`, `vendedor` se mantienen exactamente igual.
+ 
+4. **Mantener el diseño visual actual** (Inter font, shadcn/ui, TailwindCSS, colores y espaciados existentes). Solo agregar componentes nuevos donde sea necesario siguiendo el mismo estilo.
+ 
+5. **Ejecutar todas las migraciones de Drizzle** después de cada cambio al schema. Usar `npm run db:push` o el comando de migración configurado en el proyecto.
+ 
+6. **Backward compatibility**: Los negocios y sucursales que ya existen en la base de datos no deben romperse. Para los registros existentes de `companySettings` sin `businessId`, asignarlos al primer negocio activo encontrado o dejarlos como null (el código los ignorará).
+ 
+---
+ 
+## Orden de implementación sugerido
+ 
+Implementar en este orden para minimizar riesgos:
+ 
+1. CAMBIO 1 (slug + plan en businesses) — solo schema, sin lógica compleja
+2. CAMBIO 2 (companySettings por negocio) — impacto inmediato en la UI
+3. CAMBIO 4 (aislamiento total en endpoints) — seguridad crítica
+4. CAMBIO 8 (validación de negocio activo en login) — seguridad
+5. CAMBIO 7 (settings por negocio) — UX
+6. CAMBIO 3 (sistema de invitaciones) — feature nueva
+7. CAMBIO 5 (audit logs por negocio) — refinamiento
+8. CAMBIO 6 (vista de negocios mejorada) — solo frontend
+ 
+---
+ 
+## Resultado esperado
+ 
+Al terminar todos los cambios, el sistema debe cumplir:
+ 
+- Un usuario `admin` del Negocio A no puede ver productos, ventas, usuarios ni configuración del Negocio B bajo ninguna circunstancia
+- El usuario `sistemas` puede ver y gestionar todos los negocios desde una vista unificada
+- Cada negocio tiene su propio nombre, logo y configuración visual
+- Los admins pueden invitar a sus propios usuarios sin necesitar ayuda de `sistemas`
+- El login valida que el negocio del usuario esté habilitado
+- Cada negocio tiene un slug único que lo identifica (preparando el terreno para rutas tipo `/negocio/:slug` en el futuro)

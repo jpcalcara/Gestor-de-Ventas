@@ -1,0 +1,656 @@
+**Importante**: Este prompt se aplica DESPUÉS de haber implementado el sistema de multitenancy base (aislamiento por businessId, companySettings por negocio, sistema de invitaciones).
+ 
+---
+ 
+## Objetivo general
+ 
+Agregar tres capacidades nuevas al sistema:
+1. **Autoregistro público** — cualquier negocio puede registrarse solo sin intervención del superadmin
+2. **Pagos con Mercado Pago** — suscripciones mensuales recurrentes por plan, con período de gracia ante falta de pago
+3. **Sistema de planes y feature flags** — el superadmin define qué funcionalidades están disponibles en cada plan, y eso se aplica en tiempo real en frontend y backend
+ 
+---
+ 
+## PARTE 1: Schema — nuevas tablas y columnas
+ 
+### 1.1 Tabla `plans` (planes configurables por el superadmin)
+ 
+```typescript
+export const plans = pgTable("plans", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),         // "Free", "Starter", "Pro"
+  slug: text("slug").notNull().unique(),          // "free", "starter", "pro"
+  description: text("description"),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull().default("0"), // precio mensual en ARS
+  isActive: boolean("is_active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0), // orden de visualización
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+```
+ 
+### 1.2 Tabla `features` (catálogo de funcionalidades del sistema)
+ 
+```typescript
+export const features = pgTable("features", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  key: text("key").notNull().unique(),      // identificador técnico: "qr_cobros", "reportes_avanzados", "exportar_excel", "multisucursal"
+  name: text("name").notNull(),             // nombre legible: "QR de cobros", "Reportes avanzados"
+  description: text("description"),         // descripción para el superadmin
+  category: text("category"),               // "ventas", "reportes", "integraciones", "usuarios"
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+```
+ 
+### 1.3 Tabla `plan_features` (qué features tiene cada plan)
+ 
+```typescript
+export const planFeatures = pgTable("plan_features", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  planId: varchar("plan_id").notNull().references(() => plans.id, { onDelete: "cascade" }),
+  featureKey: text("feature_key").notNull().references(() => features.key, { onDelete: "cascade" }),
+  enabled: boolean("enabled").notNull().default(true),
+  limit: integer("limit"),   // opcional: límite numérico (ej: max 2 sucursales, max 5 usuarios). null = sin límite
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+```
+ 
+### 1.4 Columnas adicionales en `businesses`
+ 
+Agregar a la tabla existente `businesses`:
+ 
+```typescript
+planId: varchar("plan_id").references(() => plans.id), // FK al plan actual
+// Suscripción Mercado Pago
+mpSubscriptionId: text("mp_subscription_id"),           // ID de suscripción en MP
+mpPayerId: text("mp_payer_id"),                         // ID del pagador en MP
+mpStatus: text("mp_status"),                            // "authorized", "paused", "cancelled", "pending"
+// Control de período de gracia
+subscriptionStatus: text("subscription_status").notNull().default("trial"),
+// valores: "trial" | "active" | "grace_period" | "suspended" | "cancelled"
+trialEndsAt: timestamp("trial_ends_at"),                // cuándo termina el período de prueba
+graceEndsAt: timestamp("grace_ends_at"),                // cuándo termina el período de gracia
+lastPaymentAt: timestamp("last_payment_at"),
+nextPaymentAt: timestamp("next_payment_at"),
+gracePeriodDays: integer("grace_period_days").notNull().default(7), // configurable por negocio desde sistemas
+```
+ 
+### 1.5 Tabla `subscription_events` (historial de pagos y eventos)
+ 
+```typescript
+export const subscriptionEvents = pgTable("subscription_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessId: varchar("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+  type: text("type").notNull(), // "payment_success", "payment_failed", "subscription_created", "subscription_cancelled", "grace_period_started", "suspended", "plan_changed"
+  mpPaymentId: text("mp_payment_id"),
+  amount: decimal("amount", { precision: 10, scale: 2 }),
+  description: text("description"),
+  metadata: text("metadata"),   // JSON string con datos extra del webhook
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+```
+ 
+### 1.6 Seed inicial de planes y features
+ 
+Crear archivo `server/seed-plans.ts` que se ejecute en el bootstrap si no existen planes. Debe crear:
+ 
+**Planes:**
+- Free: $0/mes, slug "free", sortOrder 1
+- Starter: $15000/mes, slug "starter", sortOrder 2  
+- Pro: $35000/mes, slug "pro", sortOrder 3
+ 
+**Features iniciales** (el superadmin puede agregar más desde la UI):
+- key: `multisucursal`, name: "Múltiples sucursales", category: "usuarios"
+- key: `usuarios_ilimitados`, name: "Usuarios ilimitados", category: "usuarios"
+- key: `reportes_basicos`, name: "Reportes de ventas", category: "reportes"
+- key: `reportes_avanzados`, name: "Reportes avanzados", category: "reportes"
+- key: `exportar_excel`, name: "Exportar a Excel", category: "reportes"
+- key: `auditoria`, name: "Log de auditoría", category: "seguridad"
+- key: `invitaciones`, name: "Invitar usuarios", category: "usuarios"
+- key: `qr_cobros`, name: "QR de cobros", category: "integraciones"
+ 
+**Asignación inicial de features por plan:**
+ 
+| Feature | Free | Starter | Pro |
+|---|---|---|---|
+| multisucursal | ❌ (limit: 1) | ✅ (limit: 3) | ✅ (sin límite) |
+| usuarios_ilimitados | ❌ (limit: 2) | ❌ (limit: 10) | ✅ |
+| reportes_basicos | ✅ | ✅ | ✅ |
+| reportes_avanzados | ❌ | ✅ | ✅ |
+| exportar_excel | ❌ | ✅ | ✅ |
+| auditoria | ❌ | ✅ | ✅ |
+| invitaciones | ❌ | ✅ | ✅ |
+| qr_cobros | ❌ | ❌ | ✅ |
+ 
+Ejecutar `npm run db:push` después de todos los cambios de schema.
+ 
+---
+ 
+## PARTE 2: Sistema de feature flags — backend
+ 
+### 2.1 Helper central de features en `server/features.ts`
+ 
+Crear este archivo con la lógica central:
+ 
+```typescript
+// Devuelve el set de features habilitadas para un negocio dado su planId
+export async function getBusinessFeatures(businessId: string): Promise<{
+  features: Record<string, boolean>;   // { "reportes_avanzados": true, "qr_cobros": false, ... }
+  limits: Record<string, number | null>; // { "multisucursal": 3, "usuarios_ilimitados": 10, ... }
+}> { ... }
+ 
+// Verifica si un negocio tiene acceso a una feature específica
+// Lanza error 403 si no tiene acceso
+export async function requireFeature(
+  businessId: string,
+  featureKey: string,
+  req: Request,
+  res: Response
+): Promise<boolean> { ... }
+ 
+// Verifica si un negocio está dentro del límite numérico de una feature
+// Ejemplo: verificar si puede crear más sucursales
+export async function checkFeatureLimit(
+  businessId: string,
+  featureKey: string,
+  currentCount: number
+): Promise<{ allowed: boolean; limit: number | null }> { ... }
+```
+ 
+### 2.2 Middleware de feature flag para endpoints
+ 
+Crear middleware factory en `server/features.ts`:
+ 
+```typescript
+export function requireFeatureMiddleware(featureKey: string) {
+  return async (req: Request, res: Response, next: NextFunction) => {
+    if (req.session.userRole === "sistemas") return next(); // sistemas siempre pasa
+    
+    const businessId = req.session.businessId;
+    if (!businessId) return res.status(403).json({ message: "Sin negocio en sesión" });
+ 
+    // Verificar también que el negocio esté activo (no suspendido)
+    const business = await storage.getBusiness(businessId);
+    if (business?.subscriptionStatus === "suspended") {
+      return res.status(402).json({ 
+        message: "Suscripción suspendida. Por favor renovar el plan.",
+        code: "SUBSCRIPTION_SUSPENDED"
+      });
+    }
+ 
+    const { features } = await getBusinessFeatures(businessId);
+    if (!features[featureKey]) {
+      return res.status(403).json({ 
+        message: "Esta funcionalidad no está disponible en tu plan actual.",
+        code: "FEATURE_NOT_IN_PLAN",
+        feature: featureKey
+      });
+    }
+    next();
+  };
+}
+```
+ 
+### 2.3 Endpoint para consultar features del negocio en sesión
+ 
+En `server/routes.ts`, agregar:
+ 
+```
+GET /api/my-features
+  - requireAuth
+  - Si es sistemas: devuelve todas las features como true, todos los límites como null
+  - Si es admin/vendedor: devuelve el resultado de getBusinessFeatures(req.session.businessId)
+  - También devuelve subscriptionStatus, trialEndsAt, graceEndsAt, nextPaymentAt
+  - Respuesta: { features: {...}, limits: {...}, subscription: { status, trialEndsAt, graceEndsAt, nextPaymentAt, planName } }
+```
+ 
+### 2.4 Aplicar feature flags en endpoints existentes que lo necesiten
+ 
+Agregar `requireFeatureMiddleware("auditoria")` al endpoint de audit logs.
+Agregar verificación de límite `multisucursal` al crear nuevas sucursales.
+Agregar verificación de límite `usuarios_ilimitados` al crear o invitar nuevos usuarios.
+ 
+---
+ 
+## PARTE 3: Sistema de feature flags — frontend
+ 
+### 3.1 Hook `useFeatures` en `client/src/hooks/use-features.ts`
+ 
+```typescript
+export function useFeatures() {
+  const { data } = useQuery({
+    queryKey: ["/api/my-features"],
+    staleTime: 5 * 60 * 1000, // cache 5 minutos
+  });
+ 
+  const hasFeature = (key: string): boolean => {
+    return data?.features?.[key] ?? false;
+  };
+ 
+  const getLimit = (key: string): number | null => {
+    return data?.limits?.[key] ?? null;
+  };
+ 
+  return { hasFeature, getLimit, subscription: data?.subscription, isLoading: !data };
+}
+```
+ 
+### 3.2 Componente `FeatureGate` en `client/src/components/feature-gate.tsx`
+ 
+```tsx
+// Muestra el children si el negocio tiene la feature, sino muestra un banner de upgrade
+export function FeatureGate({ 
+  feature, 
+  children, 
+  fallback 
+}: { 
+  feature: string; 
+  children: React.ReactNode;
+  fallback?: React.ReactNode; // si no se pasa, muestra banner genérico de upgrade
+}) { ... }
+```
+ 
+El banner de upgrade por defecto debe ser un componente elegante (usando shadcn/ui Card) que diga: "Esta funcionalidad está disponible en planes superiores" con un botón "Ver planes" que lleve a `/pricing`.
+ 
+### 3.3 Aplicar `FeatureGate` en el frontend
+ 
+Envolver con `FeatureGate` los componentes/páginas que correspondan según la tabla de features. Ejemplos:
+- La página de Auditoría: `<FeatureGate feature="auditoria">`
+- Los botones de exportar: `<FeatureGate feature="exportar_excel">`
+- El botón de invitar usuarios: `<FeatureGate feature="invitaciones">`
+ 
+### 3.4 Banner de estado de suscripción
+ 
+En `client/src/components/navigation.tsx`, agregar un banner justo debajo del header (no dentro del header) que aparezca condicionalmente:
+ 
+- Si `subscriptionStatus === "trial"`: banner azul suave — "Estás en período de prueba. Tu prueba vence el [fecha]. Activá tu suscripción para continuar."
+- Si `subscriptionStatus === "grace_period"`: banner naranja — "Tu pago venció. Tenés hasta el [fecha] para renovar antes de que se suspenda tu cuenta."
+- Si `subscriptionStatus === "suspended"`: banner rojo — "Tu cuenta está suspendida por falta de pago. Renovar suscripción." con botón de pago
+- Si `subscriptionStatus === "active"`: no mostrar nada
+ 
+---
+ 
+## PARTE 4: Autoregistro público
+ 
+### 4.1 Página pública de registro `/register`
+ 
+Crear `client/src/pages/register.tsx` accesible sin autenticación. Debe ser una página limpia (sin el header/nav del sistema) con dos pasos:
+ 
+**Paso 1 — Datos del negocio:**
+- Razón Social (text, requerido)
+- CUIT (text, validar formato XX-XXXXXXXX-X)
+- Nombre del encargado (text)
+- Teléfono (text)
+- Email de contacto del negocio (text)
+ 
+**Paso 2 — Datos del usuario administrador:**
+- Nombre (text, requerido)
+- Apellido (text, requerido)
+- Email (text, requerido) — este será el login del admin
+- Contraseña (text, requerido, mínimo 8 caracteres)
+- Confirmar contraseña
+ 
+**Paso 3 — Elegir plan:**
+- Mostrar las cards de los 3 planes (Free, Starter, Pro) con sus features y precios
+- Si elige Free: botón "Empezar gratis" → va directo al paso 4
+- Si elige Starter o Pro: botón "Continuar al pago" → va al flujo de Mercado Pago
+ 
+**Paso 4 — Confirmación:**
+- Si eligió Free o completó el pago: pantalla de éxito con botón "Ingresar al sistema"
+ 
+### 4.2 Endpoint de autoregistro
+ 
+En `server/routes.ts`, agregar endpoint público (sin requireAuth):
+ 
+```
+POST /api/auth/register-business
+Body: {
+  // Datos del negocio
+  razonSocial: string,
+  cuit: string,
+  encargado: string,
+  telefono: string,
+  mail: string,
+  // Datos del admin
+  firstName: string,
+  lastName: string,
+  email: string,
+  password: string,
+  // Plan elegido
+  planSlug: "free" | "starter" | "pro"
+}
+```
+ 
+Lógica del endpoint:
+1. Validar que no exista un negocio con ese CUIT ni un usuario con ese email
+2. Generar el `slug` del negocio a partir del `razonSocial`
+3. Crear el usuario con rol `admin`
+4. Crear el negocio con `adminUserId` = el usuario recién creado
+5. Crear la primera sucursal automáticamente (nombre: "Casa Central", address: "A configurar")
+6. Asignar el usuario a esa sucursal via `userBranches`
+7. Asignar el usuario al negocio via `businessAdmins`
+8. Si planSlug es "free": setear `subscriptionStatus = "trial"`, `trialEndsAt = now + 14 días`, `planId` = id del plan free
+9. Si planSlug es "starter" o "pro": setear `subscriptionStatus = "pending"` (se activará cuando MP confirme el pago), `planId` = id del plan elegido
+10. Registrar evento en `subscriptionEvents` tipo "subscription_created"
+11. Si es free: iniciar sesión automáticamente y devolver `{ success: true, redirect: "/" }`
+12. Si es pago: devolver `{ success: true, checkoutUrl: "url_de_mp" }` (ver Parte 5)
+ 
+### 4.3 Página pública de pricing `/pricing`
+ 
+Crear `client/src/pages/pricing.tsx` accesible sin autenticación. Mostrar los planes traídos desde `GET /api/plans` (endpoint público). Cada plan muestra: nombre, precio, lista de features habilitadas, botón "Empezar". Al hacer clic redirige a `/register` con el plan preseleccionado via query param `?plan=starter`.
+ 
+### 4.4 Endpoint público de planes
+ 
+```
+GET /api/plans  (público, sin requireAuth)
+  - Devuelve todos los planes activos con sus features
+  - Respuesta: [{ id, name, slug, price, description, features: [{ key, name, enabled, limit }] }]
+```
+ 
+---
+ 
+## PARTE 5: Integración con Mercado Pago
+ 
+### 5.1 Configuración
+ 
+Agregar variables de entorno necesarias en Replit Secrets:
+- `MP_ACCESS_TOKEN` — token de acceso de la cuenta de MP (producción o sandbox)
+- `MP_WEBHOOK_SECRET` — secret para verificar webhooks entrantes
+- `MP_BACK_URL` — URL base del sistema (para redirects de MP)
+ 
+Instalar el SDK oficial: `npm install mercadopago`
+ 
+Crear `server/mercadopago.ts` con la inicialización del cliente:
+```typescript
+import MercadoPagoConfig, { PreApproval } from 'mercadopago';
+ 
+const client = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN! });
+export const preApproval = new PreApproval(client);
+```
+ 
+### 5.2 Crear suscripción en Mercado Pago
+ 
+En `server/mp-subscriptions.ts`, crear función:
+ 
+```typescript
+export async function createMPSubscription(params: {
+  businessId: string;
+  planId: string;
+  payerEmail: string;
+  planName: string;
+  amount: number; // en ARS
+}): Promise<{ subscriptionId: string; checkoutUrl: string }> {
+  // Crear PreApproval (suscripción recurrente) en MP
+  // frequency: 1, frequency_type: "months"
+  // back_url: `${process.env.MP_BACK_URL}/subscription/success`
+  // Guardar mpSubscriptionId en el negocio
+}
+```
+ 
+### 5.3 Endpoints de suscripción
+ 
+En `server/routes.ts`, agregar:
+ 
+```
+POST /api/subscription/checkout
+  - requireAuth (solo admin del negocio)
+  - Body: { planSlug: string }
+  - Crea la suscripción en MP y devuelve { checkoutUrl }
+ 
+GET /api/subscription/success  (público, redirige desde MP)
+  - Query params: ?subscription_id=xxx&external_reference=xxx
+  - Muestra página de éxito o redirige al dashboard
+ 
+POST /api/webhooks/mercadopago  (público, verifica firma MP)
+  - Recibe eventos de MP: payment, subscription_preapproval
+  - Verificar la firma del webhook con MP_WEBHOOK_SECRET
+  - Procesar según tipo de evento (ver 5.4)
+ 
+GET /api/subscription/portal  (requireAuth admin)
+  - Devuelve URL para que el usuario gestione su suscripción en MP
+  - Usar el mpSubscriptionId guardado para construir la URL del portal de MP
+ 
+DELETE /api/subscription  (requireAuth admin)
+  - Cancela la suscripción en MP
+  - Setea subscriptionStatus = "cancelled" en el negocio
+  - Registra evento "subscription_cancelled"
+```
+ 
+### 5.4 Procesamiento de webhooks de Mercado Pago
+ 
+En `server/mp-webhooks.ts`, crear función `processMPWebhook(event)` con esta lógica:
+ 
+**Evento: pago aprobado (`payment` con status `approved`)**
+- Buscar el negocio por `mpSubscriptionId`
+- Setear `subscriptionStatus = "active"`
+- Actualizar `lastPaymentAt = now`
+- Calcular `nextPaymentAt = now + 1 mes`
+- Limpiar `graceEndsAt`
+- Registrar evento "payment_success" en `subscriptionEvents`
+ 
+**Evento: pago rechazado o fallido (`payment` con status `rejected` o `cancelled`)**
+- Buscar el negocio
+- Si `subscriptionStatus` ya es "grace_period": no hacer nada (ya está en gracia)
+- Si `subscriptionStatus` es "active": setear `subscriptionStatus = "grace_period"`, `graceEndsAt = now + gracePeriodDays días`
+- Registrar evento "payment_failed" y "grace_period_started"
+ 
+**Evento: suscripción cancelada (`subscription_preapproval` con status `cancelled`)**
+- Setear `subscriptionStatus = "cancelled"`, `isActive = false`
+- Registrar evento "subscription_cancelled"
+ 
+**Evento: suscripción pausada (`subscription_preapproval` con status `paused`)**
+- Setear `subscriptionStatus = "grace_period"`, `graceEndsAt = now + gracePeriodDays días`
+ 
+### 5.5 Job de verificación diaria (período de gracia)
+ 
+Crear `server/subscription-checker.ts` con una función que se ejecute al arrancar el servidor y luego cada 24 horas (usar `setInterval`):
+ 
+```typescript
+export async function checkExpiredGracePeriods() {
+  // Buscar todos los negocios con subscriptionStatus = "grace_period" y graceEndsAt < now
+  const expired = await storage.getBusinessesWithExpiredGrace();
+  
+  for (const business of expired) {
+    await storage.updateBusiness(business.id, {
+      subscriptionStatus: "suspended",
+      isActive: false,  // bloquea el acceso completo
+    });
+    await storage.createSubscriptionEvent({
+      businessId: business.id,
+      type: "suspended",
+      description: `Cuenta suspendida por vencimiento del período de gracia`,
+    });
+    // Opcional: enviar email de notificación (si hay SMTP configurado)
+  }
+}
+```
+ 
+Ejecutar en `server/index.ts`:
+```typescript
+import { checkExpiredGracePeriods } from "./subscription-checker";
+// Después del bootstrapAdmin():
+await checkExpiredGracePeriods();
+setInterval(checkExpiredGracePeriods, 24 * 60 * 60 * 1000);
+```
+ 
+---
+ 
+## PARTE 6: Panel de superadmin para gestión de planes
+ 
+### 6.1 Nueva página `/admin/plans` (solo rol `sistemas`)
+ 
+Crear `client/src/pages/admin-plans.tsx`. Esta página tiene dos secciones:
+ 
+**Sección 1: Gestión de planes**
+- Tabla con los planes: nombre, precio, estado (activo/inactivo), cantidad de features habilitadas, cantidad de negocios en ese plan
+- Botón editar en cada plan: abre dialog para cambiar nombre, descripción, precio
+- NO permitir eliminar planes que tengan negocios asignados
+ 
+**Sección 2: Matriz de features por plan**
+- Tabla donde las filas son features y las columnas son los planes
+- Cada celda tiene un toggle (switch) para habilitar/deshabilitar esa feature en ese plan
+- Si la feature tiene límite numérico, mostrar un input de número al lado del toggle
+- Botón "Agregar feature" para registrar nuevas funcionalidades al catálogo (key, nombre, descripción, categoría)
+- Los cambios se guardan en tiempo real al hacer toggle (PATCH inmediato)
+- Al guardar un cambio, mostrar toast: "Cambios aplicados. Los negocios en este plan verán los cambios en su próxima sesión."
+ 
+**Sección 3: Negocios y sus suscripciones**
+- Tabla con todos los negocios: nombre, plan actual, estado de suscripción, último pago, próximo pago, días de gracia configurados
+- Botón "Cambiar plan" por negocio (sin pasar por MP, cambio manual del superadmin)
+- Input editable para cambiar los `gracePeriodDays` de cada negocio
+- Botón "Suspender" / "Reactivar" manual por negocio
+- Botón "Ver historial de pagos" que abre un dialog con los `subscriptionEvents` de ese negocio
+ 
+### 6.2 Endpoints de administración de planes
+ 
+En `server/routes.ts`, todos con `requireSistemas`:
+ 
+```
+GET /api/admin/plans
+  - Lista completa de planes con sus features y conteo de negocios
+ 
+PATCH /api/admin/plans/:id
+  - Editar nombre, descripción, precio, isActive de un plan
+ 
+GET /api/admin/features
+  - Lista todas las features del catálogo
+ 
+POST /api/admin/features
+  - Crear nueva feature (key, name, description, category)
+  - Automáticamente crear entradas en plan_features con enabled=false para todos los planes existentes
+ 
+PATCH /api/admin/plan-features
+  - Body: { planId, featureKey, enabled, limit }
+  - Actualiza una celda de la matriz
+  - Invalida el cache de features en memoria (si hay cache)
+ 
+GET /api/admin/businesses/subscriptions
+  - Lista todos los negocios con info de suscripción
+ 
+PATCH /api/admin/businesses/:id/plan
+  - Body: { planId }
+  - Cambia el plan de un negocio manualmente
+  - Registra evento "plan_changed" en subscriptionEvents
+ 
+PATCH /api/admin/businesses/:id/subscription
+  - Body: { subscriptionStatus, gracePeriodDays }
+  - Permite al superadmin suspender, reactivar, o ajustar días de gracia manualmente
+ 
+GET /api/admin/businesses/:id/subscription-events
+  - Historial de pagos y eventos de un negocio
+```
+ 
+### 6.3 Agregar link al panel de planes en la navegación
+ 
+En `client/src/components/navigation.tsx`, agregar a `navItems`:
+```typescript
+{ path: "/admin/plans", label: "Planes", icon: CreditCard, roles: ["sistemas"] },
+```
+ 
+---
+ 
+## PARTE 7: Panel de suscripción para el admin del negocio
+ 
+### 7.1 Nueva página `/billing` (solo rol `admin`)
+ 
+Crear `client/src/pages/billing.tsx`. Mostrar:
+ 
+- **Card de plan actual**: nombre del plan, precio, estado de suscripción con badge de color (verde=activo, naranja=gracia, rojo=suspendido, azul=trial)
+- **Fecha próximo pago** (si está activo) o **fecha de vencimiento del período de gracia** (si aplica)
+- **Historial de pagos**: tabla con los últimos `subscriptionEvents` tipo payment del negocio
+- **Botón "Cambiar plan"**: abre dialog con los 3 planes, marca el actual, al elegir uno diferente llama a `POST /api/subscription/checkout`
+- **Botón "Cancelar suscripción"**: con confirmación, llama a `DELETE /api/subscription`
+- **Botón "Renovar ahora"** (visible solo en grace_period y suspended): llama a `POST /api/subscription/checkout` con el plan actual
+ 
+### 7.2 Agregar link a Billing en la navegación
+ 
+En `client/src/components/navigation.tsx`:
+```typescript
+{ path: "/billing", label: "Suscripción", icon: CreditCard, roles: ["admin"] },
+```
+ 
+---
+ 
+## PARTE 8: Protección de acceso por estado de suscripción
+ 
+### 8.1 Middleware de suscripción activa
+ 
+En `server/auth.ts`, crear:
+ 
+```typescript
+export async function requireActiveSubscription(req: Request, res: Response, next: NextFunction) {
+  if (req.session.userRole === "sistemas") return next();
+  
+  const businessId = req.session.businessId;
+  if (!businessId) return next(); // sin negocio en sesión, dejar pasar (el otro middleware lo atrapa)
+ 
+  const business = await storage.getBusiness(businessId);
+  if (!business) return res.status(404).json({ message: "Negocio no encontrado" });
+ 
+  if (business.subscriptionStatus === "suspended") {
+    return res.status(402).json({
+      message: "Tu suscripción está suspendida. Por favor renovar el plan.",
+      code: "SUBSCRIPTION_SUSPENDED",
+    });
+  }
+  // trial, active, grace_period: dejan pasar
+  next();
+}
+```
+ 
+Aplicar `requireActiveSubscription` globalmente en `server/routes.ts` después de `requireAuth`, ANTES de los endpoints de negocio (no aplicar a `/api/auth/*`, `/api/plans`, `/api/webhooks/*`, `/api/invitations/accept/*`).
+ 
+### 8.2 Manejo en el frontend
+ 
+En `client/src/lib/queryClient.ts` o en el global error handler de TanStack Query, interceptar errores HTTP 402:
+ 
+```typescript
+// Si cualquier query devuelve 402 con code "SUBSCRIPTION_SUSPENDED"
+// Redirigir automáticamente a /billing con un toast de error
+```
+ 
+---
+ 
+## Restricciones y consideraciones importantes
+ 
+1. **No modificar la lógica de roles existente**. Los roles `sistemas`, `admin`, `vendedor` no cambian. El sistema de features es una capa adicional encima.
+ 
+2. **El rol `sistemas` nunca es bloqueado** por feature flags ni por estado de suscripción. Siempre tiene acceso total.
+ 
+3. **Cache de features**: la consulta a `getBusinessFeatures` puede hacerse en cada request o cachearse con un TTL corto (5 minutos). Dado que Neon es serverless, preferir cachear en memoria con un Map simple `{ businessId -> { features, cachedAt } }` y refrescar si `cachedAt` tiene más de 5 minutos. Limpiar el cache del negocio cuando el superadmin cambia sus features.
+ 
+4. **Webhook de MP es crítico**: siempre verificar la firma del webhook antes de procesar. MP envía un header `x-signature` que debe validarse con `MP_WEBHOOK_SECRET`. Si la firma no coincide, responder 401 y no procesar.
+ 
+5. **El período de prueba (trial)** aplica a todos los registros nuevos, incluyendo plan Free. `trialEndsAt` se setea en el registro. Al vencer el trial sin suscripción activa, el negocio pasa a `grace_period` también (el job diario lo maneja).
+ 
+6. **Ejecutar las migraciones** con `npm run db:push` después de todos los cambios de schema antes de arrancar.
+ 
+7. **Mantener el diseño visual actual** de shadcn/ui, Inter font, TailwindCSS. Las páginas nuevas (register, pricing, billing, admin-plans) deben seguir el mismo sistema de diseño.
+ 
+8. **La página `/register` y `/pricing` son públicas** — no deben tener el header/nav del sistema. Usar un layout alternativo sin navegación.
+ 
+---
+ 
+## Orden de implementación recomendado
+ 
+1. Schema completo (tablas `plans`, `features`, `plan_features`, `subscriptionEvents` + columnas en `businesses`) + seed inicial
+2. Helper `getBusinessFeatures` y middleware `requireFeatureMiddleware`
+3. Endpoint `GET /api/my-features` y hook `useFeatures` en frontend
+4. Componente `FeatureGate` y aplicarlo en las páginas existentes
+5. Middleware `requireActiveSubscription` y manejo 402 en frontend
+6. Autoregistro público (endpoint + página `/register` + página `/pricing`)
+7. Panel superadmin `/admin/plans` (gestión de planes y matriz de features)
+8. Integración Mercado Pago (SDK, crear suscripción, webhooks, job diario)
+9. Panel de billing `/billing` para el admin del negocio
+10. Banner de estado de suscripción en el header
+ 
+---
+ 
+## Resultado esperado
+ 
+Al terminar, el sistema debe permitir:
+- Un negocio nuevo registrarse solo en `/register`, elegir plan, pagar con MP y empezar a usar el sistema sin intervención del superadmin
+- El superadmin ver y editar desde `/admin/plans` qué features están en cada plan, con efecto inmediato
+- Cuando en el futuro se agregue una nueva funcionalidad (ej: "QR de cobros"), el superadmin solo agrega una nueva feature con `POST /api/admin/features` y la asigna a los planes desde la matriz — sin tocar código
+- Los negocios que no pagan entran en período de gracia configurable por negocio, y se suspenden automáticamente al vencer
+- El admin de cada negocio puede ver su estado de suscripción, cambiar de plan y renovar desde `/billing`
