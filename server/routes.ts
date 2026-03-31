@@ -741,7 +741,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const userId = req.session.userId!;
       const userRole = req.session.userRole!;
       const businessesList = await storage.getBusinessesForUser(userId, userRole);
-      res.json(businessesList);
+      // Enrich with branch counts
+      const enriched = await Promise.all(
+        businessesList.map(async (b) => {
+          const branches = await storage.getBranchesForBusiness(b.id);
+          return { ...b, branchCount: branches.length };
+        })
+      );
+      res.json(enriched);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -793,7 +800,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: validationError.message });
       }
 
-      const business = await storage.updateBusiness(req.params.id, result.data);
+      const updateData = { ...result.data };
+      // Auto-regenerate slug when razonSocial changes
+      if (updateData.razonSocial) {
+        const { generateSlug } = await import("./utils");
+        updateData.slug = generateSlug(updateData.razonSocial);
+      }
+
+      const business = await storage.updateBusiness(req.params.id, updateData);
       if (!business) {
         return res.status(404).json({ message: "Negocio no encontrado" });
       }

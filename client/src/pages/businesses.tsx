@@ -57,6 +57,7 @@ interface BusinessData {
   mail?: string;
   isActive: boolean;
   createdAt: string;
+  branchCount?: number;
 }
 
 const planLabels: Record<string, { label: string; variant: "secondary" | "default" | "outline" }> = {
@@ -509,6 +510,12 @@ export default function BusinessesPage() {
                   <p className="text-sm text-muted-foreground flex items-center gap-1">
                     <Mail className="h-4 w-4" />
                     {business.mail}
+                  </p>
+                )}
+                {typeof business.branchCount === "number" && (
+                  <p className="text-sm text-muted-foreground flex items-center gap-1">
+                    <Building2 className="h-4 w-4" />
+                    {business.branchCount} {business.branchCount === 1 ? "sucursal" : "sucursales"}
                   </p>
                 )}
                 <div className="flex flex-wrap gap-2 pt-4">

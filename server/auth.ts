@@ -170,6 +170,15 @@ export function registerAuthRoutes(app: any) {
         return res.status(403).json({ message: "Usuario deshabilitado. Contacte al administrador." });
       }
 
+      // Check that admin/vendedor users have at least one active business
+      if (user.role !== "sistemas") {
+        const businesses = await storage.getBusinessesForUser(user.id, user.role);
+        const activeBusinesses = businesses.filter(b => b.isActive);
+        if (activeBusinesses.length === 0 && businesses.length > 0) {
+          return res.status(403).json({ message: "El negocio asociado está deshabilitado. Contacte al administrador." });
+        }
+      }
+
       await storage.updateUser(user.id, { failedLoginAttempts: 0, lastFailedLoginAt: null });
 
       req.session.userId = user.id;
