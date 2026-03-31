@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useLocation, useSearch } from "wouter";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -12,6 +12,92 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, ArrowRight, Building2, User, CreditCard, Check } from "lucide-react";
+
+interface CuitInputProps {
+  value?: string;
+  onChange: (val: string) => void;
+}
+
+function CuitInput({ value = "", onChange }: CuitInputProps) {
+  const digits = value.replace(/\D/g, "").slice(0, 11);
+  const part1 = digits.slice(0, 2);
+  const part2 = digits.slice(2, 10);
+  const part3 = digits.slice(10, 11);
+
+  const ref2 = useRef<HTMLInputElement>(null);
+  const ref3 = useRef<HTMLInputElement>(null);
+  const ref1 = useRef<HTMLInputElement>(null);
+
+  const build = (p1: string, p2: string, p3: string) =>
+    (p1 + p2 + p3).replace(/\D/g, "");
+
+  const handlePart1 = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value.replace(/\D/g, "").slice(0, 2);
+    onChange(build(v, part2, part3));
+    if (v.length === 2) ref2.current?.focus();
+  };
+
+  const handlePart2 = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value.replace(/\D/g, "").slice(0, 8);
+    onChange(build(part1, v, part3));
+    if (v.length === 8) ref3.current?.focus();
+  };
+
+  const handlePart3 = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value.replace(/\D/g, "").slice(0, 1);
+    onChange(build(part1, part2, v));
+  };
+
+  const handleKeyDown2 = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Backspace" && part2 === "") ref1.current?.focus();
+  };
+
+  const handleKeyDown3 = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Backspace" && part3 === "") ref2.current?.focus();
+  };
+
+  return (
+    <div className="flex items-center gap-1.5" data-testid="input-cuit-group">
+      <input
+        ref={ref1}
+        type="text"
+        inputMode="numeric"
+        maxLength={2}
+        value={part1}
+        onChange={handlePart1}
+        placeholder="20"
+        data-testid="input-cuit-part1"
+        className="w-12 h-9 rounded-md border border-input bg-background px-2 text-sm text-center ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      />
+      <span className="text-muted-foreground font-medium select-none">-</span>
+      <input
+        ref={ref2}
+        type="text"
+        inputMode="numeric"
+        maxLength={8}
+        value={part2}
+        onChange={handlePart2}
+        onKeyDown={handleKeyDown2}
+        placeholder="12345678"
+        data-testid="input-cuit-part2"
+        className="w-28 h-9 rounded-md border border-input bg-background px-2 text-sm text-center ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      />
+      <span className="text-muted-foreground font-medium select-none">-</span>
+      <input
+        ref={ref3}
+        type="text"
+        inputMode="numeric"
+        maxLength={1}
+        value={part3}
+        onChange={handlePart3}
+        onKeyDown={handleKeyDown3}
+        placeholder="9"
+        data-testid="input-cuit-part3"
+        className="w-9 h-9 rounded-md border border-input bg-background px-2 text-sm text-center ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+      />
+    </div>
+  );
+}
 
 const step1Schema = z.object({
   razonSocial: z.string().min(2, "Requerido"),
@@ -142,40 +228,55 @@ export default function RegisterPage() {
                   <FormField control={form1.control} name="razonSocial" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Razón social *</FormLabel>
-                      <FormControl><Input {...field} data-testid="input-razon-social" placeholder="Mi Empresa S.A." /></FormControl>
+                      <FormControl>
+                        <Input {...field} data-testid="input-razon-social" placeholder="Mi Empresa S.A." />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
-                  <FormField control={form1.control} name="cuit" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>CUIT</FormLabel>
-                      <FormControl><Input {...field} data-testid="input-cuit" placeholder="20-12345678-9" /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
-                  <FormField control={form1.control} name="encargado" render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Encargado</FormLabel>
-                      <FormControl><Input {...field} data-testid="input-encargado" placeholder="Nombre del encargado" /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )} />
+
+                  <div className="flex flex-wrap gap-3">
+                    <FormField control={form1.control} name="cuit" render={({ field }) => (
+                      <FormItem className="shrink-0">
+                        <FormLabel>CUIT</FormLabel>
+                        <FormControl>
+                          <CuitInput value={field.value ?? ""} onChange={field.onChange} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                    <FormField control={form1.control} name="encargado" render={({ field }) => (
+                      <FormItem className="flex-1 min-w-32">
+                        <FormLabel>Encargado</FormLabel>
+                        <FormControl>
+                          <Input {...field} data-testid="input-encargado" placeholder="Nombre del encargado" />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )} />
+                  </div>
+
                   <div className="grid grid-cols-2 gap-3">
                     <FormField control={form1.control} name="telefono" render={({ field }) => (
                       <FormItem>
                         <FormLabel>Teléfono</FormLabel>
-                        <FormControl><Input {...field} data-testid="input-telefono" placeholder="+54 9 11..." /></FormControl>
+                        <FormControl>
+                          <Input {...field} data-testid="input-telefono" placeholder="+54 9 11..." />
+                        </FormControl>
                         <FormMessage />
                       </FormItem>
                     )} />
                     <FormField control={form1.control} name="mail" render={({ field }) => (
                       <FormItem>
                         <FormLabel>Email del negocio</FormLabel>
-                        <FormControl><Input {...field} data-testid="input-mail-negocio" placeholder="info@empresa.com" /></FormControl>
+                        <FormControl>
+                          <Input {...field} data-testid="input-mail-negocio" placeholder="info@empresa.com" />
+                        </FormControl>
                         <FormMessage />
                       </FormItem>
                     )} />
                   </div>
+
                   <div className="flex justify-end pt-2">
                     <Button type="submit" data-testid="button-step1-next">
                       Siguiente <ArrowRight className="h-4 w-4 ml-1" />
