@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, ArrowRight, Building2, User, CreditCard, Check, Eye, EyeOff } from "lucide-react";
+import { ArrowLeft, ArrowRight, Building2, User, CreditCard, Check, Eye, EyeOff, X } from "lucide-react";
 
 const COUNTRY_CODES = [
   { code: "+54",  iso2: "AR", iso: "ARG", name: "Argentina" },
@@ -306,9 +306,36 @@ export default function RegisterPage() {
     return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(num) + "/mes";
   };
 
+  const PLAN_HIGHLIGHTS: Record<string, { label: string; included: boolean }[]> = {
+    free: [
+      { label: "1 sucursal", included: true },
+      { label: "Hasta 2 usuarios", included: true },
+      { label: "Reportes de ventas", included: true },
+      { label: "Reportes avanzados", included: false },
+      { label: "Exportar a Excel", included: false },
+      { label: "Invitar usuarios", included: false },
+    ],
+    starter: [
+      { label: "Hasta 3 sucursales", included: true },
+      { label: "Hasta 10 usuarios", included: true },
+      { label: "Reportes avanzados", included: true },
+      { label: "Exportar a Excel", included: true },
+      { label: "Log de auditoría", included: true },
+      { label: "Invitar usuarios", included: true },
+    ],
+    pro: [
+      { label: "Sucursales ilimitadas", included: true },
+      { label: "Usuarios ilimitados", included: true },
+      { label: "Reportes avanzados", included: true },
+      { label: "Exportar a Excel", included: true },
+      { label: "Log de auditoría", included: true },
+      { label: "QR de cobros (Mercado Pago)", included: true },
+    ],
+  };
+
   return (
     <div className="min-h-screen bg-background flex items-start justify-center py-12 px-4">
-      <div className="w-full max-w-md">
+      <div className={`w-full transition-all ${step === 3 ? "max-w-2xl" : "max-w-sm sm:max-w-md"}`}>
         <div className="mb-8 text-center">
           <h1 className="text-2xl font-bold mb-1">Crear cuenta</h1>
           <p className="text-sm text-muted-foreground">Completá los pasos para registrar tu negocio</p>
@@ -459,35 +486,70 @@ export default function RegisterPage() {
 
             {step === 3 && (
               <Form {...form3}>
-                <form onSubmit={form3.handleSubmit(handleStep3)} className="space-y-4">
+                <form onSubmit={form3.handleSubmit(handleStep3)} className="space-y-5">
                   <FormField control={form3.control} name="planSlug" render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Plan *</FormLabel>
-                      <Select onValueChange={field.onChange} value={field.value}>
-                        <FormControl>
-                          <SelectTrigger data-testid="select-plan">
-                            <SelectValue placeholder="Seleccioná un plan" />
-                          </SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          {activePlans.map(plan => (
-                            <SelectItem key={plan.id} value={plan.slug} data-testid={`option-plan-${plan.slug}`}>
-                              {plan.name} — {formatPrice(plan.price)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
                       <FormMessage />
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3" data-testid="plan-cards">
+                        {activePlans.map(plan => {
+                          const selected = field.value === plan.slug;
+                          const highlights = PLAN_HIGHLIGHTS[plan.slug] ?? [];
+                          const isPopular = plan.slug === "starter";
+                          return (
+                            <button
+                              key={plan.id}
+                              type="button"
+                              data-testid={`card-plan-${plan.slug}`}
+                              onClick={() => field.onChange(plan.slug)}
+                              className={`relative text-left rounded-md border p-4 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                                selected
+                                  ? "border-primary bg-primary/5"
+                                  : "border-border bg-card hover-elevate"
+                              }`}
+                            >
+                              {isPopular && (
+                                <span className="absolute -top-2.5 left-1/2 -translate-x-1/2 bg-primary text-primary-foreground text-xs font-medium px-2.5 py-0.5 rounded-full whitespace-nowrap">
+                                  Más popular
+                                </span>
+                              )}
+
+                              {selected && (
+                                <span className="absolute top-3 right-3 flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                                  <Check className="h-3 w-3" />
+                                </span>
+                              )}
+
+                              <p className="font-semibold text-sm mb-0.5">{plan.name}</p>
+                              <p className="text-xl font-bold mb-1">{formatPrice(plan.price)}</p>
+                              <p className="text-xs text-muted-foreground mb-3">{plan.description}</p>
+
+                              <ul className="space-y-1.5">
+                                {highlights.map(h => (
+                                  <li key={h.label} className="flex items-center gap-2 text-xs">
+                                    {h.included
+                                      ? <Check className="h-3.5 w-3.5 text-primary shrink-0" />
+                                      : <X className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                                    }
+                                    <span className={h.included ? "text-foreground" : "text-muted-foreground"}>
+                                      {h.label}
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </FormItem>
                   )} />
                   <p className="text-xs text-muted-foreground">
                     Al registrarte aceptás los términos y condiciones del servicio.
                   </p>
-                  <div className="flex justify-between pt-2">
+                  <div className="flex justify-between pt-1">
                     <Button type="button" variant="outline" onClick={() => setStep(2)} data-testid="button-step3-back">
                       <ArrowLeft className="h-4 w-4 mr-1" /> Atrás
                     </Button>
-                    <Button type="submit" disabled={registerMutation.isPending} data-testid="button-step3-submit">
+                    <Button type="submit" disabled={registerMutation.isPending || !form3.watch("planSlug")} data-testid="button-step3-submit">
                       {registerMutation.isPending ? "Creando cuenta..." : "Crear cuenta"}
                     </Button>
                   </div>
