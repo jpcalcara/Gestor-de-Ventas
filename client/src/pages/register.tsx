@@ -318,7 +318,7 @@ export default function RegisterPage() {
                   <div className="flex flex-wrap gap-3">
                     <FormField control={form1.control} name="cuit" render={({ field }) => (
                       <FormItem className="shrink-0">
-                        <FormLabel>CUIT</FormLabel>
+                        <FormLabel>CUIT/CUIL</FormLabel>
                         <FormControl>
                           <CuitInput value={field.value ?? ""} onChange={field.onChange} />
                         </FormControl>
