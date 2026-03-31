@@ -11,7 +11,7 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, ArrowRight, Building2, User, CreditCard, Check } from "lucide-react";
+import { ArrowLeft, ArrowRight, Building2, User, CreditCard, Check, Eye, EyeOff } from "lucide-react";
 
 const COUNTRY_CODES = [
   { code: "+54",  iso2: "AR", iso: "ARG", name: "Argentina" },
@@ -98,6 +98,34 @@ function PhoneInput({ value = "", onChange }: PhoneInputProps) {
         data-testid="input-phone-number"
         className="flex-1"
       />
+    </div>
+  );
+}
+
+interface PasswordInputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  "data-testid"?: string;
+}
+
+function PasswordInput({ "data-testid": testId, ...props }: PasswordInputProps) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <Input
+        {...props}
+        type={show ? "text" : "password"}
+        data-testid={testId}
+        className="pr-10"
+      />
+      <button
+        type="button"
+        tabIndex={-1}
+        onClick={() => setShow(v => !v)}
+        className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
+        data-testid={testId ? `${testId}-toggle` : undefined}
+        aria-label={show ? "Ocultar contraseña" : "Ver contraseña"}
+      >
+        {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+      </button>
     </div>
   );
 }
@@ -402,14 +430,18 @@ export default function RegisterPage() {
                   <FormField control={form2.control} name="password" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Contraseña *</FormLabel>
-                      <FormControl><Input {...field} type="password" data-testid="input-password" /></FormControl>
+                      <FormControl>
+                        <PasswordInput {...field} data-testid="input-password" />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />
                   <FormField control={form2.control} name="confirmPassword" render={({ field }) => (
                     <FormItem>
                       <FormLabel>Confirmar contraseña *</FormLabel>
-                      <FormControl><Input {...field} type="password" data-testid="input-confirm-password" /></FormControl>
+                      <FormControl>
+                        <PasswordInput {...field} data-testid="input-confirm-password" />
+                      </FormControl>
                       <FormMessage />
                     </FormItem>
                   )} />

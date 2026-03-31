@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -6,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
-import { Package } from "lucide-react";
+import { Package, Eye, EyeOff } from "lucide-react";
 import { SiGoogle } from "react-icons/si";
 import { loginSchema } from "@shared/schema";
 import { z } from "zod";
@@ -21,6 +22,7 @@ export default function LoginPage() {
   const { login, loginWithGoogle } = useAuth();
   const { toast } = useToast();
   const [, navigate] = useLocation();
+  const [showPassword, setShowPassword] = useState(false);
 
   const { data: companySettings } = useQuery<CompanySettings>({
     queryKey: ["/api/company-settings"],
@@ -126,13 +128,26 @@ export default function LoginPage() {
                   <FormItem>
                     <FormLabel>Contraseña</FormLabel>
                     <FormControl>
-                      <Input
-                        type="password"
-                        placeholder="******"
-                        autoComplete="current-password"
-                        data-testid="input-password"
-                        {...field}
-                      />
+                      <div className="relative">
+                        <Input
+                          type={showPassword ? "text" : "password"}
+                          placeholder="******"
+                          autoComplete="current-password"
+                          data-testid="input-password"
+                          className="pr-10"
+                          {...field}
+                        />
+                        <button
+                          type="button"
+                          tabIndex={-1}
+                          onClick={() => setShowPassword(v => !v)}
+                          className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
+                          data-testid="button-toggle-password"
+                          aria-label={showPassword ? "Ocultar contraseña" : "Ver contraseña"}
+                        >
+                          {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        </button>
+                      </div>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
