@@ -1,9 +1,11 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Check, X, ArrowLeft } from "lucide-react";
+import { Check, X, ArrowLeft, Loader2 } from "lucide-react";
+import { apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
 
 interface PlanFeature {
   featureKey: string;
@@ -36,9 +38,36 @@ const ALL_FEATURE_KEYS = Object.keys(FEATURE_LABELS);
 
 export default function PricingPage() {
   const [, navigate] = useLocation();
+  const { toast } = useToast();
 
   const { data: plans, isLoading } = useQuery<Plan[]>({
     queryKey: ["/api/plans"],
+  });
+
+  const { data: me } = useQuery<{ id: string } | null>({
+    queryKey: ["/api/auth/me"],
+    retry: false,
+  });
+
+  const isLoggedIn = !!me?.id;
+
+  const checkoutMutation = useMutation({
+    mutationFn: (planSlug: string) =>
+      apiRequest("POST", "/api/subscription/checkout", { planSlug }),
+    onSuccess: (data: any) => {
+      if (data?.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+      } else {
+        navigate("/billing");
+      }
+    },
+    onError: (err: any) => {
+      toast({
+        title: "Error",
+        description: err?.message || "No se pudo iniciar el pago",
+        variant: "destructive",
+      });
+    },
   });
 
   const formatPrice = (price: string) => {
@@ -52,6 +81,18 @@ export default function PricingPage() {
     return { enabled: pf?.enabled ?? false, limit: pf?.limit ?? null };
   };
 
+  const handlePlanClick = (plan: Plan) => {
+    if (isLoggedIn) {
+      if (parseFloat(plan.price) === 0) {
+        navigate("/billing");
+        return;
+      }
+      checkoutMutation.mutate(plan.slug);
+    } else {
+      navigate(`/register?plan=${plan.slug}`);
+    }
+  };
+
   const activePlans = plans?.filter(p => p.isActive) ?? [];
 
   return (
@@ -59,12 +100,12 @@ export default function PricingPage() {
       <div className="max-w-5xl mx-auto px-4 py-12">
         <div className="mb-8">
           <button
-            onClick={() => navigate("/login")}
+            onClick={() => navigate(isLoggedIn ? "/billing" : "/login")}
             className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
             data-testid="link-back-login"
           >
             <ArrowLeft className="h-4 w-4" />
-            Volver al inicio
+            {isLoggedIn ? "Volver a facturación" : "Volver al inicio"}
           </button>
         </div>
 
@@ -87,6 +128,7 @@ export default function PricingPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
             {activePlans.map((plan, idx) => {
               const isPopular = idx === 1;
+              const isPending = checkoutMutation.isPending && checkoutMutation.variables === plan.slug;
               return (
                 <Card
                   key={plan.id}
@@ -116,10 +158,17 @@ export default function PricingPage() {
                     <Button
                       className="w-full"
                       variant={isPopular ? "default" : "outline"}
-                      onClick={() => navigate(`/register?plan=${plan.slug}`)}
+                      onClick={() => handlePlanClick(plan)}
+                      disabled={checkoutMutation.isPending}
                       data-testid={`button-select-plan-${plan.slug}`}
                     >
-                      {parseFloat(plan.price) === 0 ? "Empezar gratis" : "Contratar"}
+                      {isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : parseFloat(plan.price) === 0 ? (
+                        "Empezar gratis"
+                      ) : (
+                        "Contratar"
+                      )}
                     </Button>
 
                     <ul className="space-y-2 pt-2">
@@ -147,18 +196,20 @@ export default function PricingPage() {
           </div>
         )}
 
-        <div className="text-center">
-          <p className="text-sm text-muted-foreground">
-            ¿Ya tenés una cuenta?{" "}
-            <button
-              onClick={() => navigate("/login")}
-              className="text-foreground underline underline-offset-2 hover:no-underline"
-              data-testid="link-go-login"
-            >
-              Iniciá sesión
-            </button>
-          </p>
-        </div>
+        {!isLoggedIn && (
+          <div className="text-center">
+            <p className="text-sm text-muted-foreground">
+              ¿Ya tenés una cuenta?{" "}
+              <button
+                onClick={() => navigate("/login")}
+                className="text-foreground underline underline-offset-2 hover:no-underline"
+                data-testid="link-go-login"
+              >
+                Iniciá sesión
+              </button>
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

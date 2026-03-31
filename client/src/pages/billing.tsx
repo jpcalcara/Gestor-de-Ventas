@@ -170,15 +170,6 @@ export default function BillingPage() {
                 Gestionar pagos
               </Button>
             )}
-            {(status === "trial" || status === "expired" || status === "grace") && (
-              <Button
-                size="sm"
-                onClick={() => navigate("/pricing")}
-                data-testid="button-upgrade-plan"
-              >
-                Mejorar plan
-              </Button>
-            )}
             {status === "active" && (
               <Button
                 variant="outline"
@@ -199,7 +190,7 @@ export default function BillingPage() {
       </Card>
 
       {/* Upgrade options for non-active */}
-      {(status === "trial" || status === "expired" || status === "cancelled") && activePlans.length > 0 && (
+      {(status === "trial" || status === "expired" || status === "cancelled" || status === "grace") && activePlans.length > 0 && (
         <div>
           <h2 className="font-medium text-sm mb-3">Planes disponibles</h2>
           <div className="grid grid-cols-1 gap-3">
