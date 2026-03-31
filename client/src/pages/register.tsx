@@ -13,6 +13,86 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, ArrowRight, Building2, User, CreditCard, Check } from "lucide-react";
 
+const COUNTRY_CODES = [
+  { code: "+54",  iso: "ARG", name: "Argentina" },
+  { code: "+591", iso: "BOL", name: "Bolivia" },
+  { code: "+55",  iso: "BRA", name: "Brasil" },
+  { code: "+56",  iso: "CHI", name: "Chile" },
+  { code: "+57",  iso: "COL", name: "Colombia" },
+  { code: "+593", iso: "ECU", name: "Ecuador" },
+  { code: "+34",  iso: "ESP", name: "España" },
+  { code: "+1",   iso: "USA", name: "Estados Unidos" },
+  { code: "+502", iso: "GTM", name: "Guatemala" },
+  { code: "+52",  iso: "MEX", name: "México" },
+  { code: "+595", iso: "PAR", name: "Paraguay" },
+  { code: "+51",  iso: "PER", name: "Perú" },
+  { code: "+598", iso: "URU", name: "Uruguay" },
+  { code: "+58",  iso: "VEN", name: "Venezuela" },
+];
+
+interface PhoneInputProps {
+  value?: string;
+  onChange: (val: string) => void;
+}
+
+function PhoneInput({ value = "", onChange }: PhoneInputProps) {
+  const parts = value.match(/^(\+\d+)\s*(.*)$/) ?? [];
+  const initCode = COUNTRY_CODES.find(c => c.code === parts[1])?.code ?? "+54";
+  const initNum  = parts[2] ?? "";
+
+  const [countryCode, setCountryCode] = useState(initCode);
+  const [number, setNumber] = useState(initNum);
+
+  const emit = (code: string, num: string) => {
+    onChange(num ? `${code} ${num}` : "");
+  };
+
+  const handleCode = (val: string) => {
+    setCountryCode(val);
+    emit(val, number);
+  };
+
+  const handleNumber = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const v = e.target.value.replace(/[^\d\s\-()]/g, "");
+    setNumber(v);
+    emit(countryCode, v);
+  };
+
+  const selected = COUNTRY_CODES.find(c => c.code === countryCode)!;
+
+  return (
+    <div className="flex gap-1.5" data-testid="input-phone-group">
+      <Select value={countryCode} onValueChange={handleCode}>
+        <SelectTrigger
+          className="w-28 shrink-0"
+          data-testid="select-phone-country"
+        >
+          <span className="text-sm font-medium">
+            {selected.code} <span className="text-muted-foreground">({selected.iso})</span>
+          </span>
+        </SelectTrigger>
+        <SelectContent className="max-h-64">
+          {COUNTRY_CODES.map(c => (
+            <SelectItem key={c.code + c.iso} value={c.code}>
+              <span className="font-medium">{c.code}</span>
+              <span className="ml-1.5 text-muted-foreground">({c.iso})</span>
+              <span className="ml-1.5 text-xs text-muted-foreground">{c.name}</span>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Input
+        type="tel"
+        value={number}
+        onChange={handleNumber}
+        placeholder="3516002275"
+        data-testid="input-phone-number"
+        className="flex-1"
+      />
+    </div>
+  );
+}
+
 interface CuitInputProps {
   value?: string;
   onChange: (val: string) => void;
@@ -256,26 +336,24 @@ export default function RegisterPage() {
                     )} />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
-                    <FormField control={form1.control} name="telefono" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Teléfono</FormLabel>
-                        <FormControl>
-                          <Input {...field} data-testid="input-telefono" placeholder="+54 9 11..." />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                    <FormField control={form1.control} name="mail" render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Email del negocio</FormLabel>
-                        <FormControl>
-                          <Input {...field} data-testid="input-mail-negocio" placeholder="info@empresa.com" />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )} />
-                  </div>
+                  <FormField control={form1.control} name="telefono" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Teléfono</FormLabel>
+                      <FormControl>
+                        <PhoneInput value={field.value ?? ""} onChange={field.onChange} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
+                  <FormField control={form1.control} name="mail" render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Email del negocio</FormLabel>
+                      <FormControl>
+                        <Input {...field} data-testid="input-mail-negocio" placeholder="info@empresa.com" />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )} />
 
                   <div className="flex justify-end pt-2">
                     <Button type="submit" data-testid="button-step1-next">
