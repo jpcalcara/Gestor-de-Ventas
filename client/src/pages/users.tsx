@@ -6,6 +6,7 @@ import { z } from "zod";
 import { Plus, Pencil, Trash2, Phone, Mail, User, Power, Shield, ShieldCheck, UserCog, Building2, Send, Link2, X, Clock } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
+import { useFeatures } from "@/hooks/use-features";
 import { useToast } from "@/hooks/use-toast";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -114,6 +115,7 @@ export default function UsersPage() {
   const [copiedToken, setCopiedToken] = useState<string | null>(null);
 
   const isSistemas = currentUser?.role === "sistemas";
+  const { hasFeature } = useFeatures();
 
   const { data: users = [], isLoading } = useQuery<UserData[]>({
     queryKey: ["/api/users"],
@@ -349,7 +351,7 @@ export default function UsersPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {!isSistemas && (
+          {!isSistemas && hasFeature("usuarios_ilimitados") && (
             <Button variant="outline" onClick={() => setIsInviteDialogOpen(true)} data-testid="button-invite-user">
               <Send className="h-4 w-4 mr-2" />
               Invitar

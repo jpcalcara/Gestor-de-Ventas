@@ -24,7 +24,14 @@ The architecture supports multi-branch operations, where each branch is an isola
 
 ### Multi-Tenant SaaS Architecture
 
-The application is designed as a multi-tenant SaaS platform. Businesses have a `slug` and a `plan` (free/starter/pro). Company settings are isolated per business. An invitation system allows `admin` users to invite new users to their business/branch with specific roles. Audit logs are filtered by business for non-sistemas users, and login validates business activity.
+The application is a fully multi-tenant SaaS platform with subscription management:
+- **Plans**: Free/Starter/Pro plans stored in the `plans` table, with per-plan feature toggles in `plan_features` and a `features` catalogue.
+- **Feature Flags**: `server/features.ts` provides `getBusinessFeatures` (5-min in-memory cache), `requireFeatureMiddleware` and `requireActiveSubscription` middleware. Frontend uses `useFeatures` hook and `FeatureGate` component.
+- **Subscription Lifecycle**: Businesses have `subscriptionStatus` (trial/active/grace/expired/cancelled/pending), `trialEndsAt`, `graceEndsAt`, `nextPaymentAt`, and `gracePeriodDays`. `subscription-checker.ts` runs daily to suspend expired businesses.
+- **Mercado Pago Integration**: `mp-subscriptions.ts` and `mp-webhooks.ts` handle checkout, activation, and webhook processing (requires `MP_ACCESS_TOKEN`, `MP_WEBHOOK_SECRET`, `MP_BACK_URL` env vars).
+- **Self-Registration**: `POST /api/auth/register-business` creates business + admin user + first branch + company settings atomically. Free plan auto-logs in; paid plans redirect to MP checkout.
+- **Subscription Events**: `subscriptionEvents` table tracks all lifecycle transitions for audit/billing history.
+- Company settings are isolated per business. An invitation system allows `admin` users to invite new users to their business/branch with specific roles. Audit logs are filtered by business for non-sistemas users, and login validates business activity.
 
 ### Frontend Architecture
 

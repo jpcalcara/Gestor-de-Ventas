@@ -1,15 +1,22 @@
-import type { Express, Request, Response } from "express";
+import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertSaleSchema, updateSaleSchema, updateCompanySettingsSchema, insertBranchSchema, updateBranchSchema, insertBranchStockSchema, updateUserBranchesSchema, insertInvitationSchema } from "@shared/schema";
+import { insertProductSchema, insertSaleSchema, updateSaleSchema, updateCompanySettingsSchema, insertBranchSchema, updateBranchSchema, insertBranchStockSchema, updateUserBranchesSchema, insertInvitationSchema, updatePlanSchema, insertFeatureSchema, registerBusinessSchema } from "@shared/schema";
 import { fromError } from "zod-validation-error";
 import { registerAuthRoutes, requireAuth, requireAdmin, hashPassword } from "./auth";
 import { generateSlug } from "./utils";
+import { requireFeatureMiddleware, getBusinessFeatures, checkFeatureLimit, invalidateFeatureCache, requireActiveSubscription } from "./features";
 import { z } from "zod";
 import multer from "multer";
 import path from "path";
 import fs from "fs";
 import crypto from "crypto";
+
+function requireSistemas(req: Request, res: Response, next: NextFunction) {
+  if (!req.session.userId) return res.status(401).json({ message: "No autenticado" });
+  if (req.session.userRole !== "sistemas") return res.status(403).json({ message: "Solo superadmin puede realizar esta acción" });
+  next();
+}
 
 const uploadsDir = path.join(process.cwd(), "uploads");
 if (!fs.existsSync(uploadsDir)) {
@@ -680,7 +687,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.get("/api/audit-logs", requireAdmin, async (req: Request, res: Response) => {
+  app.get("/api/audit-logs", requireAdmin, requireFeatureMiddleware("auditoria"), async (req: Request, res: Response) => {
     try {
       const offset = Math.max(0, parseInt(req.query.offset as string) || 0);
       const limit = Math.max(1, Math.min(100, parseInt(req.query.limit as string) || 50));
@@ -1513,6 +1520,422 @@ export async function registerRoutes(app: Express): Promise<Server> {
       await storage.markInvitationUsed(invitation.id);
 
       res.json({ success: true, message: "Cuenta creada exitosamente. Puede iniciar sesión." });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ===== PUBLIC PLANS ENDPOINT =====
+  app.get("/api/plans", async (req: Request, res: Response) => {
+    try {
+      const planList = await storage.getPlans(false);
+      const allPlanFeatures = await storage.getAllPlanFeatures();
+
+      const result = await Promise.all(planList.map(async (plan) => {
+        const pf = allPlanFeatures.filter(f => f.planId === plan.id);
+        return { ...plan, features: pf };
+      }));
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ===== MY FEATURES ENDPOINT =====
+  app.get("/api/my-features", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const userRole = req.session.userRole!;
+      if (userRole === "sistemas") {
+        const allFeaturesList = await storage.getFeatures();
+        const featMap: Record<string, boolean> = {};
+        const limMap: Record<string, number | null> = {};
+        for (const f of allFeaturesList) { featMap[f.key] = true; limMap[f.key] = null; }
+        return res.json({
+          features: featMap, limits: limMap,
+          subscription: { status: "active", trialEndsAt: null, graceEndsAt: null, nextPaymentAt: null, planName: "Sistemas" },
+        });
+      }
+
+      const businessId = req.session.businessId;
+      if (!businessId) {
+        return res.json({ features: {}, limits: {}, subscription: { status: "trial" } });
+      }
+
+      const { features: featMap, limits: limMap } = await getBusinessFeatures(businessId);
+      const business = await storage.getBusiness(businessId);
+      let planName = business?.plan || "free";
+      if (business?.planId) {
+        const plan = await storage.getPlan(business.planId);
+        if (plan) planName = plan.name;
+      }
+
+      res.json({
+        features: featMap, limits: limMap,
+        subscription: {
+          status: business?.subscriptionStatus || "trial",
+          trialEndsAt: business?.trialEndsAt,
+          graceEndsAt: business?.graceEndsAt,
+          nextPaymentAt: business?.nextPaymentAt,
+          planName,
+        },
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ===== PUBLIC REGISTRATION =====
+  app.post("/api/auth/register-business", async (req: Request, res: Response) => {
+    try {
+      const result = registerBusinessSchema.safeParse(req.body);
+      if (!result.success) {
+        const validationError = fromError(result.error);
+        return res.status(400).json({ message: validationError.message });
+      }
+
+      const { razonSocial, cuit, encargado, telefono, mail, firstName, lastName, email, password, planSlug } = result.data;
+
+      // Check uniqueness
+      const existingUser = await storage.getUserByEmail(email);
+      if (existingUser) return res.status(400).json({ message: "Ya existe un usuario con ese email" });
+
+      if (cuit) {
+        const businesses_list = await storage.getBusinesses(true);
+        if (businesses_list.some(b => b.cuit === cuit)) {
+          return res.status(400).json({ message: "Ya existe un negocio con ese CUIT" });
+        }
+      }
+
+      const plan = await storage.getPlanBySlug(planSlug);
+
+      // Create admin user
+      const hashedPassword = await hashPassword(password);
+      const user = await storage.createUser({
+        email, firstName, lastName, password: hashedPassword, role: "admin", isActive: true,
+      });
+
+      // Create business
+      const slug = generateSlug(razonSocial);
+      const trialEndsAt = new Date();
+      trialEndsAt.setDate(trialEndsAt.getDate() + 14);
+
+      const business = await storage.createBusiness({
+        razonSocial, slug, plan: planSlug, planId: plan?.id || null,
+        cuit: cuit || null, encargado: encargado || null, telefono: telefono || null, mail: mail || null,
+        adminUserId: user.id,
+        subscriptionStatus: planSlug === "free" ? "trial" : "pending",
+        trialEndsAt: planSlug === "free" ? trialEndsAt : null,
+      } as any);
+
+      // Create first branch
+      const branch = await storage.createBranch({
+        businessId: business.id, number: 1, name: "Casa Central", address: "A configurar", isActive: true,
+      });
+
+      // Assign user to branch
+      await storage.setUserBranches(user.id, [branch.id]);
+
+      // Assign as business admin
+      await storage.setBusinessAdmins(business.id, [user.id]);
+
+      // Create settings
+      await storage.getOrCreateCompanySettings(business.id, razonSocial);
+
+      // Create subscription event
+      await storage.createSubscriptionEvent({
+        businessId: business.id,
+        type: "subscription_created",
+        description: `Negocio registrado con plan ${planSlug}`,
+      } as any);
+
+      if (planSlug === "free") {
+        // Auto login
+        req.session.userId = user.id;
+        req.session.userEmail = user.email;
+        req.session.userName = `${user.firstName} ${user.lastName}`;
+        req.session.userRole = "admin";
+        req.session.businessId = business.id;
+        req.session.businessName = business.razonSocial;
+        req.session.branchId = branch.id;
+        req.session.branchName = branch.name;
+
+        return res.json({ success: true, redirect: "/" });
+      }
+
+      // For paid plans, create MP subscription
+      try {
+        const { createMPSubscription } = await import("./mp-subscriptions");
+        const amount = plan ? parseFloat(plan.price) : 0;
+        const { checkoutUrl } = await createMPSubscription({
+          businessId: business.id, planId: plan?.id || "", payerEmail: email,
+          planName: plan?.name || planSlug, amount,
+        });
+        return res.json({ success: true, checkoutUrl });
+      } catch (mpError: any) {
+        // If MP is not configured, auto-activate with trial
+        await storage.updateBusiness(business.id, { subscriptionStatus: "trial", trialEndsAt } as any);
+        req.session.userId = user.id;
+        req.session.userEmail = user.email;
+        req.session.userName = `${user.firstName} ${user.lastName}`;
+        req.session.userRole = "admin";
+        req.session.businessId = business.id;
+        req.session.businessName = business.razonSocial;
+        req.session.branchId = branch.id;
+        req.session.branchName = branch.name;
+        return res.json({ success: true, redirect: "/" });
+      }
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ===== SUBSCRIPTION ENDPOINTS =====
+  app.post("/api/subscription/checkout", requireAuth, requireActiveSubscription, async (req: Request, res: Response) => {
+    try {
+      if (req.session.userRole !== "admin" && req.session.userRole !== "sistemas") {
+        return res.status(403).json({ message: "Sin permiso" });
+      }
+      const businessId = req.session.businessId;
+      if (!businessId) return res.status(400).json({ message: "Sin negocio en sesión" });
+
+      const { planSlug } = req.body;
+      const plan = await storage.getPlanBySlug(planSlug);
+      if (!plan) return res.status(404).json({ message: "Plan no encontrado" });
+
+      const user = await storage.getUser(req.session.userId!);
+      if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
+
+      try {
+        const { createMPSubscription } = await import("./mp-subscriptions");
+        const { checkoutUrl } = await createMPSubscription({
+          businessId, planId: plan.id, payerEmail: user.email,
+          planName: plan.name, amount: parseFloat(plan.price),
+        });
+
+        // Update plan
+        await storage.updateBusiness(businessId, { plan: plan.slug, planId: plan.id } as any);
+
+        res.json({ checkoutUrl });
+      } catch (mpError: any) {
+        res.status(503).json({ message: "Mercado Pago no está configurado." });
+      }
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/subscription/success", async (req: Request, res: Response) => {
+    res.redirect("/?subscribed=1");
+  });
+
+  app.get("/api/subscription/portal", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const businessId = req.session.businessId;
+      if (!businessId) return res.status(400).json({ message: "Sin negocio en sesión" });
+      const business = await storage.getBusiness(businessId);
+      if (!business?.mpSubscriptionId) {
+        return res.status(404).json({ message: "Sin suscripción activa en Mercado Pago" });
+      }
+      const portalUrl = `https://www.mercadopago.com.ar/subscriptions/${business.mpSubscriptionId}`;
+      res.json({ portalUrl });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/subscription", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const businessId = req.session.businessId;
+      if (!businessId) return res.status(400).json({ message: "Sin negocio en sesión" });
+      const business = await storage.getBusiness(businessId);
+      if (!business) return res.status(404).json({ message: "Negocio no encontrado" });
+
+      if (business.mpSubscriptionId) {
+        try {
+          const { cancelMPSubscription } = await import("./mp-subscriptions");
+          await cancelMPSubscription(business.mpSubscriptionId);
+        } catch {}
+      }
+
+      await storage.updateBusiness(businessId, { subscriptionStatus: "cancelled" } as any);
+      await storage.createSubscriptionEvent({
+        businessId, type: "subscription_cancelled",
+        description: "Suscripción cancelada por el usuario",
+      } as any);
+
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ===== WEBHOOKS =====
+  app.post("/api/webhooks/mercadopago", async (req: Request, res: Response) => {
+    try {
+      const signature = req.headers["x-signature"] as string;
+      const webhookSecret = process.env.MP_WEBHOOK_SECRET;
+
+      if (webhookSecret && signature) {
+        // Verify signature
+        const parts = signature.split(",");
+        const tsPart = parts.find(p => p.startsWith("ts="));
+        const v1Part = parts.find(p => p.startsWith("v1="));
+        if (tsPart && v1Part) {
+          const ts = tsPart.replace("ts=", "");
+          const v1 = v1Part.replace("v1=", "");
+          const requestId = req.headers["x-request-id"] as string || "";
+          const dataId = req.body?.data?.id || "";
+          const manifest = `id:${dataId};request-id:${requestId};ts:${ts};`;
+          const computed = crypto.createHmac("sha256", webhookSecret).update(manifest).digest("hex");
+          if (computed !== v1) {
+            return res.status(401).json({ message: "Firma inválida" });
+          }
+        }
+      }
+
+      const { processMPWebhook } = await import("./mp-webhooks");
+      await processMPWebhook(req.body);
+      res.json({ received: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ===== SUPERADMIN PLAN MANAGEMENT =====
+  app.get("/api/admin/plans", requireSistemas, async (req: Request, res: Response) => {
+    try {
+      const planList = await storage.getPlans(true);
+      const allFeaturesList = await storage.getFeatures();
+      const allPlanFeatures = await storage.getAllPlanFeatures();
+      const allBusinesses = await storage.getBusinesses(true);
+
+      const result = planList.map(plan => {
+        const pf = allPlanFeatures.filter(f => f.planId === plan.id);
+        const businessCount = allBusinesses.filter(b => b.planId === plan.id || b.plan === plan.slug).length;
+        return { ...plan, planFeatures: pf, businessCount };
+      });
+      res.json({ plans: result, features: allFeaturesList });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/admin/plans/:id", requireSistemas, async (req: Request, res: Response) => {
+    try {
+      const result = updatePlanSchema.safeParse(req.body);
+      if (!result.success) {
+        const validationError = fromError(result.error);
+        return res.status(400).json({ message: validationError.message });
+      }
+      const plan = await storage.updatePlan(req.params.id, result.data as any);
+      if (!plan) return res.status(404).json({ message: "Plan no encontrado" });
+      res.json(plan);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/admin/features", requireSistemas, async (req: Request, res: Response) => {
+    try {
+      res.json(await storage.getFeatures());
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/admin/features", requireSistemas, async (req: Request, res: Response) => {
+    try {
+      const result = insertFeatureSchema.safeParse(req.body);
+      if (!result.success) {
+        const validationError = fromError(result.error);
+        return res.status(400).json({ message: validationError.message });
+      }
+      const feature = await storage.createFeature(result.data);
+      // Auto-create disabled entries for all existing plans
+      const planList = await storage.getPlans(true);
+      await Promise.all(planList.map(p => storage.upsertPlanFeature(p.id, feature.key, false, null)));
+      invalidateFeatureCache();
+      res.status(201).json(feature);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/admin/plan-features", requireSistemas, async (req: Request, res: Response) => {
+    try {
+      const { planId, featureKey, enabled, limit } = req.body;
+      if (!planId || !featureKey) return res.status(400).json({ message: "planId y featureKey son requeridos" });
+      const pf = await storage.upsertPlanFeature(planId, featureKey, enabled ?? true, limit ?? null);
+      invalidateFeatureCache();
+      res.json(pf);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/admin/businesses/subscriptions", requireSistemas, async (req: Request, res: Response) => {
+    try {
+      const allBusinesses = await storage.getBusinesses(true);
+      const planList = await storage.getPlans(true);
+      const result = await Promise.all(allBusinesses.map(async b => {
+        const plan = planList.find(p => p.id === b.planId || p.slug === b.plan);
+        return { ...b, planName: plan?.name || b.plan };
+      }));
+      res.json(result);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/admin/businesses/:id/plan", requireSistemas, async (req: Request, res: Response) => {
+    try {
+      const { planId } = req.body;
+      const plan = await storage.getPlan(planId);
+      if (!plan) return res.status(404).json({ message: "Plan no encontrado" });
+      const business = await storage.updateBusiness(req.params.id, { plan: plan.slug, planId } as any);
+      if (!business) return res.status(404).json({ message: "Negocio no encontrado" });
+      await storage.createSubscriptionEvent({
+        businessId: req.params.id, type: "plan_changed",
+        description: `Plan cambiado a ${plan.name} por sistemas`,
+      } as any);
+      invalidateFeatureCache(req.params.id);
+      res.json(business);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/admin/businesses/:id/subscription", requireSistemas, async (req: Request, res: Response) => {
+    try {
+      const { subscriptionStatus, gracePeriodDays, isActive } = req.body;
+      const updateData: any = {};
+      if (subscriptionStatus !== undefined) updateData.subscriptionStatus = subscriptionStatus;
+      if (gracePeriodDays !== undefined) updateData.gracePeriodDays = gracePeriodDays;
+      if (isActive !== undefined) updateData.isActive = isActive;
+      const business = await storage.updateBusiness(req.params.id, updateData);
+      if (!business) return res.status(404).json({ message: "Negocio no encontrado" });
+      res.json(business);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.get("/api/admin/businesses/:id/subscription-events", requireSistemas, async (req: Request, res: Response) => {
+    try {
+      const events = await storage.getSubscriptionEvents(req.params.id);
+      res.json(events);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // Also expose subscription events for admin of their own business
+  app.get("/api/subscription/events", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const businessId = req.session.businessId;
+      if (!businessId) return res.json([]);
+      const events = await storage.getSubscriptionEvents(businessId);
+      res.json(events);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

@@ -4,6 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { FeatureGate } from "@/components/feature-gate";
 import { formatDistanceToNow } from "date-fns";
 import { es } from "date-fns/locale";
 import { 
@@ -102,6 +103,7 @@ export default function AuditPage() {
   };
 
   return (
+    <FeatureGate feature="auditoria">
     <div className="container mx-auto px-4 md:px-8 py-6">
       <div className="mb-6">
         <h1 className="text-2xl font-semibold">Registro de Auditoría</h1>
@@ -198,5 +200,6 @@ export default function AuditPage() {
         </>
       )}
     </div>
+    </FeatureGate>
   );
 }

@@ -7,6 +7,8 @@ import { registerRoutes } from "./routes";
 import { setupVite, serveStatic, log } from "./vite";
 import { bootstrapAdmin } from "./bootstrap";
 import { setupAuth } from "./replitAuth";
+import { seedPlansAndFeatures } from "./seed-plans";
+import { checkExpiredGracePeriods } from "./subscription-checker";
 
 const app = express();
 
@@ -84,6 +86,9 @@ app.use((req, res, next) => {
 
 (async () => {
   await bootstrapAdmin();
+  await seedPlansAndFeatures();
+  await checkExpiredGracePeriods();
+  setInterval(checkExpiredGracePeriods, 24 * 60 * 60 * 1000);
   await setupAuth(app);
   
   const server = await registerRoutes(app);

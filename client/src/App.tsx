@@ -17,6 +17,10 @@ import SettingsPage from "@/pages/settings";
 import AuditPage from "@/pages/audit";
 import LoginPage from "@/pages/login";
 import InvitePage from "@/pages/invite";
+import PricingPage from "@/pages/pricing";
+import RegisterPage from "@/pages/register";
+import BillingPage from "@/pages/billing";
+import AdminPlansPage from "@/pages/admin-plans";
 import NotFound from "@/pages/not-found";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -83,6 +87,8 @@ function Router() {
       <Route path="/login">
         <RedirectIfAuthenticated component={LoginPage} />
       </Route>
+      <Route path="/pricing" component={PricingPage} />
+      <Route path="/register" component={RegisterPage} />
       <Route path="/invite/:token" component={InvitePage} />
       <Route path="/">
         <ProtectedRoute component={SalesPage} />
@@ -110,6 +116,12 @@ function Router() {
       </Route>
       <Route path="/audit">
         <AdminRoute component={AuditPage} />
+      </Route>
+      <Route path="/billing">
+        <AdminRoute component={BillingPage} />
+      </Route>
+      <Route path="/admin/plans">
+        <AdminRoute component={AdminPlansPage} />
       </Route>
       <Route component={NotFound} />
     </Switch>

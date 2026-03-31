@@ -107,17 +107,58 @@ export const companySettings = pgTable("company_settings", {
   updatedAt: timestamp("updated_at").defaultNow(),
 });
 
+export const plans = pgTable("plans", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  slug: text("slug").notNull().unique(),
+  description: text("description"),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull().default("0"),
+  isActive: boolean("is_active").notNull().default(true),
+  sortOrder: integer("sort_order").notNull().default(0),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export const features = pgTable("features", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  key: text("key").notNull().unique(),
+  name: text("name").notNull(),
+  description: text("description"),
+  category: text("category"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const planFeatures = pgTable("plan_features", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  planId: varchar("plan_id").notNull().references(() => plans.id, { onDelete: "cascade" }),
+  featureKey: text("feature_key").notNull().references(() => features.key, { onDelete: "cascade" }),
+  enabled: boolean("enabled").notNull().default(true),
+  limit: integer("limit"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
 export const businesses = pgTable("businesses", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   razonSocial: text("razon_social").notNull().unique(),
   slug: text("slug").unique(),
   plan: text("plan").notNull().default("free"),
+  planId: varchar("plan_id").references(() => plans.id),
   cuit: text("cuit").unique(),
   encargado: text("encargado"),
   telefono: text("telefono"),
   mail: text("mail"),
   adminUserId: varchar("admin_user_id").notNull().references(() => users.id),
   isActive: boolean("is_active").notNull().default(true),
+  // Subscription / MP
+  mpSubscriptionId: text("mp_subscription_id"),
+  mpPayerId: text("mp_payer_id"),
+  mpStatus: text("mp_status"),
+  subscriptionStatus: text("subscription_status").notNull().default("trial"),
+  trialEndsAt: timestamp("trial_ends_at"),
+  graceEndsAt: timestamp("grace_ends_at"),
+  lastPaymentAt: timestamp("last_payment_at"),
+  nextPaymentAt: timestamp("next_payment_at"),
+  gracePeriodDays: integer("grace_period_days").notNull().default(7),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
@@ -153,6 +194,17 @@ export const userBranches = pgTable("user_branches", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   userId: varchar("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   branchId: varchar("branch_id").notNull().references(() => branches.id, { onDelete: "cascade" }),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const subscriptionEvents = pgTable("subscription_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  businessId: varchar("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
+  type: text("type").notNull(),
+  mpPaymentId: text("mp_payment_id"),
+  amount: decimal("amount", { precision: 10, scale: 2 }),
+  description: text("description"),
+  metadata: text("metadata"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -513,3 +565,39 @@ export const insertInvitationSchema = createInsertSchema(invitations).omit({
 
 export type Invitation = typeof invitations.$inferSelect;
 export type InsertInvitation = z.infer<typeof insertInvitationSchema>;
+
+// Plans / Features schemas
+export const insertPlanSchema = createInsertSchema(plans).omit({ id: true, createdAt: true, updatedAt: true });
+export const updatePlanSchema = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().nullable().optional(),
+  price: z.coerce.number().min(0).optional(),
+  isActive: z.boolean().optional(),
+});
+export type Plan = typeof plans.$inferSelect;
+export type InsertPlan = z.infer<typeof insertPlanSchema>;
+
+export const insertFeatureSchema = createInsertSchema(features).omit({ id: true, createdAt: true });
+export type Feature = typeof features.$inferSelect;
+export type InsertFeature = z.infer<typeof insertFeatureSchema>;
+
+export const insertPlanFeatureSchema = createInsertSchema(planFeatures).omit({ id: true, createdAt: true });
+export type PlanFeature = typeof planFeatures.$inferSelect;
+export type InsertPlanFeature = z.infer<typeof insertPlanFeatureSchema>;
+
+export const insertSubscriptionEventSchema = createInsertSchema(subscriptionEvents).omit({ id: true, createdAt: true });
+export type SubscriptionEvent = typeof subscriptionEvents.$inferSelect;
+export type InsertSubscriptionEvent = z.infer<typeof insertSubscriptionEventSchema>;
+
+export const registerBusinessSchema = z.object({
+  razonSocial: z.string().min(1, "La razón social es requerida"),
+  cuit: z.string().optional().or(z.literal("")).nullable(),
+  encargado: z.string().optional().or(z.literal("")).nullable(),
+  telefono: z.string().optional().or(z.literal("")).nullable(),
+  mail: z.string().email("Email inválido").optional().or(z.literal("")).nullable(),
+  firstName: z.string().min(1, "El nombre es requerido"),
+  lastName: z.string().min(1, "El apellido es requerido"),
+  email: z.string().email("Email inválido"),
+  password: z.string().min(8, "La contraseña debe tener al menos 8 caracteres"),
+  planSlug: z.enum(["free", "starter", "pro"]).default("free"),
+});

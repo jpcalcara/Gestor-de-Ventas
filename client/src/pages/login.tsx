@@ -12,6 +12,7 @@ import { loginSchema } from "@shared/schema";
 import { z } from "zod";
 import { Separator } from "@/components/ui/separator";
 import { useQuery } from "@tanstack/react-query";
+import { useLocation } from "wouter";
 import type { CompanySettings } from "@shared/schema";
 
 type LoginFormData = z.infer<typeof loginSchema>;
@@ -19,6 +20,7 @@ type LoginFormData = z.infer<typeof loginSchema>;
 export default function LoginPage() {
   const { login, loginWithGoogle } = useAuth();
   const { toast } = useToast();
+  const [, navigate] = useLocation();
 
   const { data: companySettings } = useQuery<CompanySettings>({
     queryKey: ["/api/company-settings"],
@@ -154,6 +156,24 @@ export default function LoginPage() {
           </div>
         </CardContent>
       </Card>
+      <p className="text-center text-sm text-muted-foreground mt-4">
+        ¿No tenés cuenta?{" "}
+        <button
+          onClick={() => navigate("/register")}
+          className="text-foreground underline underline-offset-2 hover:no-underline"
+          data-testid="link-go-register"
+        >
+          Registrá tu negocio
+        </button>
+        {" · "}
+        <button
+          onClick={() => navigate("/pricing")}
+          className="text-foreground underline underline-offset-2 hover:no-underline"
+          data-testid="link-go-pricing"
+        >
+          Ver planes
+        </button>
+      </p>
     </div>
   );
 }

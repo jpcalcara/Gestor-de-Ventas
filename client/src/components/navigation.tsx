@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import { Link, useLocation } from "wouter";
-import { Package, ShoppingCart, BarChart3, Users, ClipboardList, LogOut, Camera, Settings, Building2 } from "lucide-react";
+import { Package, ShoppingCart, BarChart3, Users, ClipboardList, LogOut, Camera, Settings, Building2, CreditCard, Layers, AlertTriangle, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { BranchSwitcher } from "@/components/branch-selector";
+import { useFeatures } from "@/hooks/use-features";
 import type { CompanySettings } from "@shared/schema";
 
 export function Navigation() {
@@ -66,6 +67,13 @@ export function Navigation() {
     }
   };
 
+  const { subscription } = useFeatures();
+
+  const showSubscriptionBanner =
+    user?.role !== "sistemas" &&
+    subscription &&
+    (subscription.status === "grace" || subscription.status === "expired" || subscription.status === "trial");
+
   const navItems = [
     { path: "/", label: "Vender", icon: ShoppingCart, roles: ["sistemas", "admin", "vendedor"] },
     { path: "/stock", label: "Consultar Stock", icon: Package, roles: ["sistemas", "admin", "vendedor"] },
@@ -75,6 +83,8 @@ export function Navigation() {
     { path: "/branches", label: "Sucursales", icon: Building2, roles: ["sistemas", "admin"] },
     { path: "/settings", label: "Configuración", icon: Settings, roles: ["sistemas", "admin"] },
     { path: "/audit", label: "Auditoría", icon: ClipboardList, roles: ["sistemas", "admin"] },
+    { path: "/billing", label: "Facturación", icon: CreditCard, roles: ["admin"] },
+    { path: "/admin/plans", label: "Planes", icon: Layers, roles: ["sistemas"] },
   ];
 
   const visibleItems = navItems.filter(item => 
@@ -87,6 +97,24 @@ export function Navigation() {
   };
 
   return (
+    <>
+    {showSubscriptionBanner && (
+      <div className="sticky top-0 z-[60] w-full bg-yellow-50 dark:bg-yellow-950 border-b border-yellow-200 dark:border-yellow-800 px-4 py-2 flex items-center justify-between gap-2" data-testid="banner-subscription-warning">
+        <div className="flex items-center gap-2 text-sm text-yellow-800 dark:text-yellow-200">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span>
+            {subscription?.status === "expired"
+              ? "Tu suscripción ha vencido. "
+              : subscription?.status === "grace"
+              ? "Estás en período de gracia. "
+              : "Estás en período de prueba. "}
+            <Link href="/billing" className="underline underline-offset-2 font-medium hover:no-underline" data-testid="link-banner-billing">
+              Ver planes
+            </Link>
+          </span>
+        </div>
+      </div>
+    )}
     <header className="sticky top-0 z-50 w-full border-b bg-background">
       <div className="container mx-auto px-4 md:px-8">
         <div className="flex h-16 items-center justify-between gap-4">
@@ -203,5 +231,6 @@ export function Navigation() {
         </div>
       </div>
     </header>
+    </>
   );
 }

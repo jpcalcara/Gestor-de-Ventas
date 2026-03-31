@@ -44,6 +44,11 @@ export const getQueryFn: <T>(options: {
       return null;
     }
 
+    if (res.status === 402) {
+      // Feature not available on current plan — return a structured object instead of throwing
+      return { _featureBlocked: true, status: 402 };
+    }
+
     await throwIfResNotOk(res);
     return await res.json();
   };

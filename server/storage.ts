@@ -30,6 +30,14 @@ import {
   type UserWithBranches,
   type Invitation,
   type InsertInvitation,
+  type Plan,
+  type InsertPlan,
+  type Feature,
+  type InsertFeature,
+  type PlanFeature,
+  type InsertPlanFeature,
+  type SubscriptionEvent,
+  type InsertSubscriptionEvent,
   products,
   sales,
   saleOrders,
@@ -43,10 +51,14 @@ import {
   branchStocks,
   userBranches,
   invitations,
+  plans,
+  features,
+  planFeatures,
+  subscriptionEvents,
   updateSaleSchema,
 } from "@shared/schema";
 import { db } from "./db";
-import { eq, desc, sql, and, or, inArray } from "drizzle-orm";
+import { eq, desc, sql, and, or, inArray, lt } from "drizzle-orm";
 
 export interface IStorage {
   getProducts(branchId?: string): Promise<Product[]>;
@@ -118,6 +130,24 @@ export interface IStorage {
   setUserBranches(userId: string, branchIds: string[]): Promise<void>;
   canUserAccessBranch(userId: string, branchId: string, role: string): Promise<boolean>;
   getUserWithBranches(userId: string): Promise<UserWithBranches | undefined>;
+
+  // Plans & Features
+  getPlans(includeInactive?: boolean): Promise<Plan[]>;
+  getPlan(id: string): Promise<Plan | undefined>;
+  getPlanBySlug(slug: string): Promise<Plan | undefined>;
+  createPlan(plan: InsertPlan): Promise<Plan>;
+  updatePlan(id: string, updates: Partial<InsertPlan>): Promise<Plan | undefined>;
+  getFeatures(): Promise<Feature[]>;
+  createFeature(feature: InsertFeature): Promise<Feature>;
+  getPlanFeatures(planId: string): Promise<PlanFeature[]>;
+  upsertPlanFeature(planId: string, featureKey: string, enabled: boolean, limit?: number | null): Promise<PlanFeature>;
+  getAllPlanFeatures(): Promise<PlanFeature[]>;
+
+  // Subscription events
+  createSubscriptionEvent(event: InsertSubscriptionEvent): Promise<SubscriptionEvent>;
+  getSubscriptionEvents(businessId: string): Promise<SubscriptionEvent[]>;
+  getBusinessesWithExpiredGrace(): Promise<Business[]>;
+  getUserCountForBusiness(businessId: string): Promise<number>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -976,6 +1006,105 @@ export class DatabaseStorage implements IStorage {
         branch: a.branches || undefined,
       })),
     };
+  }
+
+  // Plans & Features
+  async getPlans(includeInactive = false): Promise<Plan[]> {
+    if (includeInactive) return await db.select().from(plans).orderBy(plans.sortOrder);
+    return await db.select().from(plans).where(eq(plans.isActive, true)).orderBy(plans.sortOrder);
+  }
+
+  async getPlan(id: string): Promise<Plan | undefined> {
+    const [p] = await db.select().from(plans).where(eq(plans.id, id));
+    return p || undefined;
+  }
+
+  async getPlanBySlug(slug: string): Promise<Plan | undefined> {
+    const [p] = await db.select().from(plans).where(eq(plans.slug, slug));
+    return p || undefined;
+  }
+
+  async createPlan(plan: InsertPlan): Promise<Plan> {
+    const [p] = await db.insert(plans).values({ ...plan, price: String(plan.price) }).returning();
+    return p;
+  }
+
+  async updatePlan(id: string, updates: Partial<InsertPlan>): Promise<Plan | undefined> {
+    const updateData: any = { ...updates, updatedAt: new Date() };
+    if (updates.price !== undefined) updateData.price = String(updates.price);
+    const [p] = await db.update(plans).set(updateData).where(eq(plans.id, id)).returning();
+    return p || undefined;
+  }
+
+  async getFeatures(): Promise<Feature[]> {
+    return await db.select().from(features).orderBy(features.category, features.name);
+  }
+
+  async createFeature(feature: InsertFeature): Promise<Feature> {
+    const [f] = await db.insert(features).values(feature).returning();
+    return f;
+  }
+
+  async getPlanFeatures(planId: string): Promise<PlanFeature[]> {
+    return await db.select().from(planFeatures).where(eq(planFeatures.planId, planId));
+  }
+
+  async getAllPlanFeatures(): Promise<PlanFeature[]> {
+    return await db.select().from(planFeatures);
+  }
+
+  async upsertPlanFeature(planId: string, featureKey: string, enabled: boolean, limit?: number | null): Promise<PlanFeature> {
+    const [existing] = await db.select().from(planFeatures).where(
+      and(eq(planFeatures.planId, planId), eq(planFeatures.featureKey, featureKey))
+    );
+
+    if (existing) {
+      const [updated] = await db.update(planFeatures)
+        .set({ enabled, limit: limit !== undefined ? limit : existing.limit })
+        .where(eq(planFeatures.id, existing.id))
+        .returning();
+      return updated;
+    }
+
+    const [created] = await db.insert(planFeatures)
+      .values({ planId, featureKey, enabled, limit: limit ?? null })
+      .returning();
+    return created;
+  }
+
+  // Subscription events
+  async createSubscriptionEvent(event: InsertSubscriptionEvent): Promise<SubscriptionEvent> {
+    const [e] = await db.insert(subscriptionEvents)
+      .values({ ...event, amount: event.amount ? String(event.amount) : null })
+      .returning();
+    return e;
+  }
+
+  async getSubscriptionEvents(businessId: string): Promise<SubscriptionEvent[]> {
+    return await db.select().from(subscriptionEvents)
+      .where(eq(subscriptionEvents.businessId, businessId))
+      .orderBy(desc(subscriptionEvents.createdAt));
+  }
+
+  async getBusinessesWithExpiredGrace(): Promise<Business[]> {
+    return await db.select().from(businesses).where(
+      and(
+        eq(businesses.subscriptionStatus, "grace_period"),
+        lt(businesses.graceEndsAt, new Date())
+      )
+    );
+  }
+
+  async getUserCountForBusiness(businessId: string): Promise<number> {
+    // Count users who have access to any branch of this business
+    const businessBranches = await db.select({ id: branches.id }).from(branches)
+      .where(eq(branches.businessId, businessId));
+    if (businessBranches.length === 0) return 0;
+    const branchIds = businessBranches.map(b => b.id);
+    const result = await db.select({ count: sql<number>`count(distinct user_id)` })
+      .from(userBranches)
+      .where(inArray(userBranches.branchId, branchIds));
+    return Number(result[0]?.count ?? 0);
   }
 }
 
