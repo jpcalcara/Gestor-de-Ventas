@@ -51,14 +51,14 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
+    <div className="min-h-screen flex flex-col items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-sm sm:max-w-md">
         <CardHeader className="space-y-2 text-center">
           <div className="flex justify-center mb-2">
             {companySettings?.logoUrl ? (
-              <img 
-                src={companySettings.logoUrl} 
-                alt={companySettings.companyName || "Logo"} 
+              <img
+                src={companySettings.logoUrl}
+                alt={companySettings.companyName || "Logo"}
                 className="h-16 w-16 object-contain rounded-lg"
                 data-testid="img-company-logo"
               />
@@ -148,32 +148,34 @@ export default function LoginPage() {
               </Button>
             </form>
           </Form>
-          <div className="mt-4 text-center text-sm text-muted-foreground">
+
+          <div className="text-center text-sm text-muted-foreground">
             <p>Credenciales por defecto:</p>
             <p className="font-mono text-xs mt-1">
               admin@inventory.com / admin123
             </p>
           </div>
+
+          <div className="border-t pt-4 text-center text-sm text-muted-foreground">
+            ¿No tenés cuenta?{" "}
+            <button
+              onClick={() => navigate("/register")}
+              className="text-foreground underline underline-offset-2 hover:no-underline"
+              data-testid="link-go-register"
+            >
+              Registrá tu negocio
+            </button>
+            <span className="mx-1">·</span>
+            <button
+              onClick={() => navigate("/pricing")}
+              className="text-foreground underline underline-offset-2 hover:no-underline"
+              data-testid="link-go-pricing"
+            >
+              Ver planes
+            </button>
+          </div>
         </CardContent>
       </Card>
-      <p className="text-center text-sm text-muted-foreground mt-4">
-        ¿No tenés cuenta?{" "}
-        <button
-          onClick={() => navigate("/register")}
-          className="text-foreground underline underline-offset-2 hover:no-underline"
-          data-testid="link-go-register"
-        >
-          Registrá tu negocio
-        </button>
-        {" · "}
-        <button
-          onClick={() => navigate("/pricing")}
-          className="text-foreground underline underline-offset-2 hover:no-underline"
-          data-testid="link-go-pricing"
-        >
-          Ver planes
-        </button>
-      </p>
     </div>
   );
 }
