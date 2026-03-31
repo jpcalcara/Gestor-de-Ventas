@@ -14,21 +14,27 @@ import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, ArrowRight, Building2, User, CreditCard, Check } from "lucide-react";
 
 const COUNTRY_CODES = [
-  { code: "+54",  iso: "ARG", name: "Argentina" },
-  { code: "+591", iso: "BOL", name: "Bolivia" },
-  { code: "+55",  iso: "BRA", name: "Brasil" },
-  { code: "+56",  iso: "CHI", name: "Chile" },
-  { code: "+57",  iso: "COL", name: "Colombia" },
-  { code: "+593", iso: "ECU", name: "Ecuador" },
-  { code: "+34",  iso: "ESP", name: "España" },
-  { code: "+1",   iso: "USA", name: "Estados Unidos" },
-  { code: "+502", iso: "GTM", name: "Guatemala" },
-  { code: "+52",  iso: "MEX", name: "México" },
-  { code: "+595", iso: "PAR", name: "Paraguay" },
-  { code: "+51",  iso: "PER", name: "Perú" },
-  { code: "+598", iso: "URU", name: "Uruguay" },
-  { code: "+58",  iso: "VEN", name: "Venezuela" },
+  { code: "+54",  iso2: "AR", iso: "ARG", name: "Argentina" },
+  { code: "+591", iso2: "BO", iso: "BOL", name: "Bolivia" },
+  { code: "+55",  iso2: "BR", iso: "BRA", name: "Brasil" },
+  { code: "+56",  iso2: "CL", iso: "CHI", name: "Chile" },
+  { code: "+57",  iso2: "CO", iso: "COL", name: "Colombia" },
+  { code: "+593", iso2: "EC", iso: "ECU", name: "Ecuador" },
+  { code: "+34",  iso2: "ES", iso: "ESP", name: "España" },
+  { code: "+1",   iso2: "US", iso: "USA", name: "Estados Unidos" },
+  { code: "+502", iso2: "GT", iso: "GTM", name: "Guatemala" },
+  { code: "+52",  iso2: "MX", iso: "MEX", name: "México" },
+  { code: "+595", iso2: "PY", iso: "PAR", name: "Paraguay" },
+  { code: "+51",  iso2: "PE", iso: "PER", name: "Perú" },
+  { code: "+598", iso2: "UY", iso: "URU", name: "Uruguay" },
+  { code: "+58",  iso2: "VE", iso: "VEN", name: "Venezuela" },
 ];
+
+function countryFlag(iso2: string) {
+  return [...iso2.toUpperCase()].map(c =>
+    String.fromCodePoint(c.charCodeAt(0) + 0x1F1A5)
+  ).join("");
+}
 
 interface PhoneInputProps {
   value?: string;
@@ -64,19 +70,22 @@ function PhoneInput({ value = "", onChange }: PhoneInputProps) {
     <div className="flex gap-1.5" data-testid="input-phone-group">
       <Select value={countryCode} onValueChange={handleCode}>
         <SelectTrigger
-          className="w-28 shrink-0"
+          className="w-32 shrink-0"
           data-testid="select-phone-country"
         >
-          <span className="text-sm font-medium">
-            {selected.code} <span className="text-muted-foreground">({selected.iso})</span>
+          <span className="flex items-center gap-1.5 text-sm">
+            <span className="text-base leading-none">{countryFlag(selected.iso2)}</span>
+            <span className="font-medium">{selected.code}</span>
           </span>
         </SelectTrigger>
         <SelectContent className="max-h-64">
           {COUNTRY_CODES.map(c => (
             <SelectItem key={c.code + c.iso} value={c.code}>
-              <span className="font-medium">{c.code}</span>
-              <span className="ml-1.5 text-muted-foreground">({c.iso})</span>
-              <span className="ml-1.5 text-xs text-muted-foreground">{c.name}</span>
+              <span className="flex items-center gap-2">
+                <span className="text-base leading-none">{countryFlag(c.iso2)}</span>
+                <span className="font-medium">{c.code}</span>
+                <span className="text-muted-foreground text-xs">{c.name}</span>
+              </span>
             </SelectItem>
           ))}
         </SelectContent>
