@@ -133,6 +133,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const product = await storage.createProduct({ ...result.data, branchId });
+
+      // Auto-create branch stock record with the product's initial stock
+      if (result.data.stock !== undefined) {
+        await storage.upsertBranchStock({
+          branchId,
+          productId: product.id,
+          stock: String(result.data.stock),
+          lowStockThreshold: null,
+        });
+      }
       
       await createAuditLog(
         req.session.userId!,
@@ -178,6 +188,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const product = await storage.updateProduct(req.params.id, result.data, branchId);
       if (!product) {
         return res.status(404).json({ message: "Producto no encontrado en esta sucursal" });
+      }
+
+      // Sync branch stock when stock changes
+      if (result.data.stock !== undefined) {
+        await storage.upsertBranchStock({
+          branchId,
+          productId: product.id,
+          stock: String(result.data.stock),
+          lowStockThreshold: null,
+        });
       }
       
       await createAuditLog(
