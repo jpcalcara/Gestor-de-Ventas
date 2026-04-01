@@ -5,7 +5,8 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
-import { useLocation } from "wouter";
+import { useLocation, useSearch } from "wouter";
+import { useEffect } from "react";
 import { format, parseISO } from "date-fns";
 import { es } from "date-fns/locale";
 import { CreditCard, CalendarDays, AlertTriangle, CheckCircle2, XCircle, Clock } from "lucide-react";
@@ -49,6 +50,16 @@ export default function BillingPage() {
   const { subscription, isLoading } = useFeatures();
   const { toast } = useToast();
   const [, navigate] = useLocation();
+  const search = useSearch();
+
+  useEffect(() => {
+    if (search.includes("subscribed=1")) {
+      toast({ title: "Suscripción activada", description: "Tu pago fue procesado correctamente." });
+      queryClient.invalidateQueries({ queryKey: ["/api/my-features"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/subscription/events"] });
+      navigate("/billing", { replace: true });
+    }
+  }, [search]);
 
   const { data: events } = useQuery<SubscriptionEvent[]>({
     queryKey: ["/api/subscription/events"],

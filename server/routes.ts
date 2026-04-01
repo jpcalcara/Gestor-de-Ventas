@@ -1735,7 +1735,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/subscription/success", async (req: Request, res: Response) => {
-    res.redirect("/?subscribed=1");
+    res.redirect("/billing?subscribed=1");
   });
 
   app.get("/api/subscription/portal", requireAuth, async (req: Request, res: Response) => {

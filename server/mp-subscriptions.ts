@@ -26,7 +26,7 @@ export async function createMPSubscription(params: {
         transaction_amount: params.amount,
         currency_id: "ARS",
       },
-      back_url: `${backUrl}/subscription/success`,
+      back_url: `${backUrl}/api/subscription/success`,
       status: "pending",
     },
   });
