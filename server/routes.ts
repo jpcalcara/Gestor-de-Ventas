@@ -1718,17 +1718,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         res.json({ checkoutUrl });
       } catch (mpError: any) {
-        // MP not configured: auto-activate with 30-day trial on selected plan
-        const trialEndsAt = new Date();
-        trialEndsAt.setDate(trialEndsAt.getDate() + 30);
+        // MP not configured: activate directly as active
         await storage.updateBusiness(businessId, {
-          subscriptionStatus: "trial",
-          trialEndsAt,
+          subscriptionStatus: "active",
         } as any);
         await storage.createSubscriptionEvent({
           businessId,
           type: "plan_changed",
-          description: `Cambio a plan ${plan.name} (activado sin pasarela de pago)`,
+          description: `Cambio a plan ${plan.name}`,
         });
         res.json({ activated: true });
       }
