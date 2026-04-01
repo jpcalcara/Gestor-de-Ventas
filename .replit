@@ -40,3 +40,8 @@ waitForPort = 5000
 
 [agent]
 integrations = ["javascript_mem_db:1.0.0", "javascript_database:1.0.0", "javascript_log_in_with_replit:1.0.0"]
+
+[userenv]
+
+[userenv.shared]
+MP_BACK_URL = "https://dd677d5a-9807-403c-b44e-9dcd7e03ee57-00-43bchvjc7qgv.kirk.replit.dev"
