@@ -65,7 +65,7 @@ export default function SalesPage() {
   const isLoading = productsLoading || stocksLoading;
 
   const getProductStock = (productId: string): number => {
-    const branchStock = branchStocks.find(bs => bs.productId === productId);
+    const branchStock = (branchStocks ?? []).find(bs => bs.productId === productId);
     return branchStock ? Number(branchStock.stock) : 0;
   };
 
