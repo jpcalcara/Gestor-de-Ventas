@@ -7,7 +7,7 @@ export async function createMPSubscription(params: {
   payerEmail: string;
   planName: string;
   amount: number;
-}): Promise<{ subscriptionId: string; checkoutUrl: string }> {
+}): Promise<{ checkoutUrl: string }> {
   if (!isMPConfigured()) {
     throw new Error("Mercado Pago no está configurado. Configure MP_ACCESS_TOKEN.");
   }
@@ -15,39 +15,45 @@ export async function createMPSubscription(params: {
   const mp = getMPClient()!;
   const backUrl = process.env.MP_BACK_URL || "http://localhost:5000";
 
-  const response = await mp.preApproval.create({
+  const response = await mp.preference.create({
     body: {
-      reason: `Suscripción ${planName}`,
-      external_reference: params.businessId,
-      payer_email: params.payerEmail,
-      auto_recurring: {
-        frequency: 1,
-        frequency_type: "months",
-        transaction_amount: params.amount,
-        currency_id: "ARS",
+      items: [
+        {
+          id: params.planId,
+          title: `Suscripción ${params.planName}`,
+          quantity: 1,
+          unit_price: params.amount,
+          currency_id: "ARS",
+        },
+      ],
+      payer: {
+        email: params.payerEmail,
       },
-      back_url: `${backUrl}/api/subscription/success`,
-      status: "pending",
+      external_reference: params.businessId,
+      back_urls: {
+        success: `${backUrl}/api/subscription/success`,
+        failure: `${backUrl}/api/subscription/failure`,
+        pending: `${backUrl}/api/subscription/pending`,
+      },
+      auto_return: "approved",
+      metadata: {
+        businessId: params.businessId,
+        planId: params.planId,
+        planSlug: params.planName,
+      },
     },
   });
 
-  const subscriptionId = response.id!;
   const checkoutUrl = response.init_point!;
 
-  // Save mpSubscriptionId and mpPayerId to business
   await storage.updateBusiness(params.businessId, {
-    mpSubscriptionId: subscriptionId,
     subscriptionStatus: "pending",
   } as any);
 
-  return { subscriptionId, checkoutUrl };
+  return { checkoutUrl };
 }
 
-export async function cancelMPSubscription(subscriptionId: string): Promise<void> {
-  if (!isMPConfigured()) return;
-  const mp = getMPClient()!;
-  await mp.preApproval.update({
-    id: subscriptionId,
-    body: { status: "cancelled" },
-  });
+export async function cancelMPSubscription(_subscriptionId: string): Promise<void> {
+  // Preference-based payments don't have cancellable subscriptions via API
+  return;
 }

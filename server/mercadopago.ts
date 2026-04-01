@@ -1,17 +1,17 @@
-import { MercadoPagoConfig, PreApproval } from "mercadopago";
+import { MercadoPagoConfig, Preference } from "mercadopago";
 
 const accessToken = process.env.MP_ACCESS_TOKEN;
 
 let client: MercadoPagoConfig | null = null;
-let preApprovalInstance: PreApproval | null = null;
+let preferenceInstance: Preference | null = null;
 
-export function getMPClient(): { client: MercadoPagoConfig; preApproval: PreApproval } | null {
+export function getMPClient(): { client: MercadoPagoConfig; preference: Preference } | null {
   if (!accessToken) return null;
   if (!client) {
     client = new MercadoPagoConfig({ accessToken });
-    preApprovalInstance = new PreApproval(client);
+    preferenceInstance = new Preference(client);
   }
-  return { client, preApproval: preApprovalInstance! };
+  return { client, preference: preferenceInstance! };
 }
 
 export function isMPConfigured(): boolean {

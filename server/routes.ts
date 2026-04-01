@@ -1707,9 +1707,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(req.session.userId!);
       if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
 
-      // Update plan record first
-      await storage.updateBusiness(businessId, { plan: plan.slug, planId: plan.id } as any);
+      const { isMPConfigured } = await import("./mercadopago");
 
+      if (!isMPConfigured()) {
+        // No MP token set: activate directly (dev/demo mode)
+        await storage.updateBusiness(businessId, {
+          plan: plan.slug, planId: plan.id, subscriptionStatus: "active",
+        } as any);
+        await storage.createSubscriptionEvent({
+          businessId,
+          type: "plan_changed",
+          description: `Cambio a plan ${plan.name}`,
+        });
+        return res.json({ activated: true });
+      }
+
+      // MP is configured: create real checkout
+      await storage.updateBusiness(businessId, { plan: plan.slug, planId: plan.id } as any);
       try {
         const { createMPSubscription } = await import("./mp-subscriptions");
         const { checkoutUrl } = await createMPSubscription({
@@ -1718,16 +1732,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         });
         res.json({ checkoutUrl });
       } catch (mpError: any) {
-        // MP not configured: activate directly as active
-        await storage.updateBusiness(businessId, {
-          subscriptionStatus: "active",
-        } as any);
-        await storage.createSubscriptionEvent({
-          businessId,
-          type: "plan_changed",
-          description: `Cambio a plan ${plan.name}`,
-        });
-        res.json({ activated: true });
+        console.error("[MP Checkout Error]", mpError?.message || mpError);
+        const detail = mpError?.cause?.message || mpError?.message || "Error al conectar con Mercado Pago";
+        res.status(502).json({ message: detail });
       }
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -1735,7 +1742,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   app.get("/api/subscription/success", async (req: Request, res: Response) => {
+    const businessId = req.query.external_reference as string;
+    if (businessId) {
+      try {
+        const business = await storage.getBusiness(businessId);
+        if (business) {
+          const now = new Date();
+          const nextPaymentAt = new Date(now);
+          nextPaymentAt.setMonth(nextPaymentAt.getMonth() + 1);
+          await storage.updateBusiness(businessId, {
+            subscriptionStatus: "active",
+            lastPaymentAt: now,
+            nextPaymentAt,
+          } as any);
+          await storage.createSubscriptionEvent({
+            businessId,
+            type: "subscription_activated",
+            description: `Suscripción activada tras pago aprobado`,
+          });
+        }
+      } catch (e) {
+        console.error("[subscription/success]", e);
+      }
+    }
     res.redirect("/billing?subscribed=1");
+  });
+
+  app.get("/api/subscription/failure", async (_req: Request, res: Response) => {
+    res.redirect("/billing?payment_failed=1");
+  });
+
+  app.get("/api/subscription/pending", async (_req: Request, res: Response) => {
+    res.redirect("/billing?payment_pending=1");
   });
 
   app.get("/api/subscription/portal", requireAuth, async (req: Request, res: Response) => {

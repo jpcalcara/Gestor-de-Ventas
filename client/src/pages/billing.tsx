@@ -58,6 +58,13 @@ export default function BillingPage() {
       queryClient.invalidateQueries({ queryKey: ["/api/my-features"] });
       queryClient.invalidateQueries({ queryKey: ["/api/subscription/events"] });
       navigate("/billing", { replace: true });
+    } else if (search.includes("payment_failed=1")) {
+      toast({ title: "Pago rechazado", description: "No se pudo procesar el pago. Intentá de nuevo.", variant: "destructive" });
+      navigate("/billing", { replace: true });
+    } else if (search.includes("payment_pending=1")) {
+      toast({ title: "Pago pendiente", description: "Tu pago está siendo procesado. Te avisaremos cuando se confirme." });
+      queryClient.invalidateQueries({ queryKey: ["/api/my-features"] });
+      navigate("/billing", { replace: true });
     }
   }, [search]);
 
