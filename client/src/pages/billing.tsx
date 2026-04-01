@@ -79,7 +79,13 @@ export default function BillingPage() {
   const checkoutMutation = useMutation({
     mutationFn: (planSlug: string) => apiRequest("POST", "/api/subscription/checkout", { planSlug }),
     onSuccess: (data: any) => {
-      if (data?.checkoutUrl) window.location.href = data.checkoutUrl;
+      if (data?.checkoutUrl) {
+        window.location.href = data.checkoutUrl;
+      } else if (data?.activated) {
+        toast({ title: "Plan actualizado", description: "Tu suscripción fue activada correctamente." });
+        queryClient.invalidateQueries({ queryKey: ["/api/my-features"] });
+        queryClient.invalidateQueries({ queryKey: ["/api/subscription/events"] });
+      }
     },
     onError: () => toast({ title: "Error", description: "No se pudo iniciar el pago", variant: "destructive" }),
   });

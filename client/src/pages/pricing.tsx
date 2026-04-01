@@ -61,10 +61,10 @@ export default function PricingPage() {
         navigate("/billing");
       }
     },
-    onError: (err: any) => {
+    onError: () => {
       toast({
         title: "Error",
-        description: err?.message || "No se pudo iniciar el pago",
+        description: "No se pudo iniciar el pago",
         variant: "destructive",
       });
     },

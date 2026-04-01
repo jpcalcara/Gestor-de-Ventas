@@ -1707,19 +1707,30 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const user = await storage.getUser(req.session.userId!);
       if (!user) return res.status(404).json({ message: "Usuario no encontrado" });
 
+      // Update plan record first
+      await storage.updateBusiness(businessId, { plan: plan.slug, planId: plan.id } as any);
+
       try {
         const { createMPSubscription } = await import("./mp-subscriptions");
         const { checkoutUrl } = await createMPSubscription({
           businessId, planId: plan.id, payerEmail: user.email,
           planName: plan.name, amount: parseFloat(plan.price),
         });
-
-        // Update plan
-        await storage.updateBusiness(businessId, { plan: plan.slug, planId: plan.id } as any);
-
         res.json({ checkoutUrl });
       } catch (mpError: any) {
-        res.status(503).json({ message: "Mercado Pago no está configurado." });
+        // MP not configured: auto-activate with 30-day trial on selected plan
+        const trialEndsAt = new Date();
+        trialEndsAt.setDate(trialEndsAt.getDate() + 30);
+        await storage.updateBusiness(businessId, {
+          subscriptionStatus: "trial",
+          trialEndsAt,
+        } as any);
+        await storage.createSubscriptionEvent({
+          businessId,
+          type: "plan_changed",
+          description: `Cambio a plan ${plan.name} (activado sin pasarela de pago)`,
+        });
+        res.json({ activated: true });
       }
     } catch (error: any) {
       res.status(500).json({ message: error.message });
