@@ -1,13 +1,14 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Plus, Search, Edit, Trash2, PackageX, Package } from "lucide-react";
+import { Plus, Search, Edit, Trash2, PackageX, Package, ScanLine } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { ProductForm } from "@/components/product-form";
+import { ProductScanner, type ScannedProductData } from "@/components/product-scanner";
 import { DeleteProductDialog } from "@/components/delete-product-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatPrice, formatNumber, isLowStock } from "@/lib/format";
@@ -22,6 +23,13 @@ export default function ProductsPage() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
   const [productToDelete, setProductToDelete] = useState<Product | null>(null);
+  const [isScannerOpen, setIsScannerOpen] = useState(false);
+  const [prefillData, setPrefillData] = useState<{
+    title?: string;
+    description?: string;
+    imageUrl?: string;
+    barcode?: string;
+  } | undefined>(undefined);
 
   const { data: products, isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
@@ -43,6 +51,7 @@ export default function ProductsPage() {
 
   const handleAddSuccess = () => {
     setIsAddDialogOpen(false);
+    setPrefillData(undefined);
   };
 
   const handleEditSuccess = () => {
@@ -54,6 +63,17 @@ export default function ProductsPage() {
     setProductToDelete(null);
   };
 
+  const handleScanResult = (data: ScannedProductData) => {
+    setIsScannerOpen(false);
+    setPrefillData({
+      title: data.title,
+      description: data.description,
+      imageUrl: data.imageUrl,
+      barcode: data.barcode,
+    });
+    setIsAddDialogOpen(true);
+  };
+
   return (
     <div className="container mx-auto px-4 md:px-8 py-6 md:py-8 space-y-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
@@ -62,20 +82,43 @@ export default function ProductsPage() {
           <p className="text-sm text-muted-foreground mt-1">Gestiona tu inventario de productos</p>
         </div>
         {isAdmin && (
-          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-            <DialogTrigger asChild>
-              <Button data-testid="button-add-product">
-                <Plus className="h-4 w-4 mr-2" />
-                Agregar Producto
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Nuevo Producto</DialogTitle>
-              </DialogHeader>
-              <ProductForm onSuccess={handleAddSuccess} />
-            </DialogContent>
-          </Dialog>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Dialog open={isScannerOpen} onOpenChange={setIsScannerOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" data-testid="button-scan-product">
+                  <ScanLine className="h-4 w-4 mr-2" />
+                  Escanear producto
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Escanear Producto</DialogTitle>
+                </DialogHeader>
+                <ProductScanner
+                  onProductFound={handleScanResult}
+                  onClose={() => setIsScannerOpen(false)}
+                />
+              </DialogContent>
+            </Dialog>
+
+            <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
+              setIsAddDialogOpen(open);
+              if (!open) setPrefillData(undefined);
+            }}>
+              <DialogTrigger asChild>
+                <Button data-testid="button-add-product">
+                  <Plus className="h-4 w-4 mr-2" />
+                  Agregar Producto
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Nuevo Producto</DialogTitle>
+                </DialogHeader>
+                <ProductForm prefillData={prefillData} onSuccess={handleAddSuccess} />
+              </DialogContent>
+            </Dialog>
+          </div>
         )}
       </div>
 
@@ -140,7 +183,6 @@ export default function ProductsPage() {
               <Card key={product.id} className="hover-elevate" data-testid={`card-product-${product.id}`}>
                 <CardContent className="p-4">
                   <div className="flex items-center gap-4">
-                    {/* Imagen miniatura clickeable */}
                     <div 
                       className="h-16 w-16 rounded-md bg-muted flex-shrink-0 overflow-hidden cursor-pointer"
                       onClick={() => setLocation(`/products/${product.id}`)}
@@ -159,7 +201,6 @@ export default function ProductsPage() {
                       )}
                     </div>
 
-                    {/* Información del producto */}
                     <div className="flex-1 min-w-0">
                       <h3 
                         className="text-base font-semibold cursor-pointer hover:underline" 
@@ -192,7 +233,6 @@ export default function ProductsPage() {
                       </div>
                     </div>
 
-                    {/* Acciones (solo admin) */}
                     {isAdmin && (
                       <div className="flex items-center gap-2 flex-shrink-0">
                         <Button

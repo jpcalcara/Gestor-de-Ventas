@@ -75,6 +75,155 @@ async function createAuditLog(
 export async function registerRoutes(app: Express): Promise<Server> {
   registerAuthRoutes(app);
   
+  app.get("/api/product-lookup/barcode/:code", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const { code } = req.params;
+      if (!code || code.length < 4) {
+        return res.status(400).json({ message: "Código de barras inválido" });
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+
+      try {
+        const response = await fetch(
+          `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json`,
+          { signal: controller.signal }
+        );
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          return res.status(404).json({ message: "Producto no encontrado en la base de datos pública" });
+        }
+
+        const data = await response.json();
+
+        if (!data || data.status !== 1 || !data.product) {
+          return res.status(404).json({ message: "Producto no encontrado en la base de datos pública" });
+        }
+
+        const p = data.product;
+        res.json({
+          title: p.product_name_es || p.product_name || "",
+          description: p.generic_name || p.categories || "",
+          brand: p.brands || "",
+          imageUrl: p.image_url || p.image_front_url || "",
+          barcode: code,
+          source: "openfoodfacts",
+        });
+      } catch (err: any) {
+        clearTimeout(timeout);
+        if (err.name === "AbortError") {
+          return res.status(503).json({ message: "La consulta al servicio externo tardó demasiado. Intenta de nuevo." });
+        }
+        return res.status(503).json({ message: "Error al consultar la base de datos pública de productos" });
+      }
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/product-lookup/image", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (!apiKey) {
+        return res.status(503).json({ message: "El reconocimiento por imagen no está configurado. Falta la API key de Anthropic." });
+      }
+
+      const { imageBase64, mimeType } = req.body;
+      if (!imageBase64 || !mimeType) {
+        return res.status(400).json({ message: "Imagen y tipo MIME son requeridos" });
+      }
+
+      const validMimes = ["image/jpeg", "image/png", "image/webp"];
+      if (!validMimes.includes(mimeType)) {
+        return res.status(400).json({ message: "Formato de imagen no soportado. Usa JPEG, PNG o WebP." });
+      }
+
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 30000);
+
+      try {
+        const response = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          signal: controller.signal,
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model: "claude-sonnet-4-20250514",
+            max_tokens: 300,
+            messages: [{
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: mimeType,
+                    data: imageBase64,
+                  },
+                },
+                {
+                  type: "text",
+                  text: `Analizá esta imagen de un producto de comercio minorista. 
+Respondé ÚNICAMENTE con un JSON sin markdown, con esta estructura:
+{
+  "title": "nombre comercial del producto",
+  "description": "descripción breve del producto (tipo, sabor, variante, etc.)",
+  "brand": "marca del producto",
+  "confidence": "high" | "medium" | "low"
+}
+Si no podés identificar el producto con certeza, ponés confidence: "low" e igualmente completás lo que puedas.`,
+                },
+              ],
+            }],
+          }),
+        });
+        clearTimeout(timeout);
+
+        if (!response.ok) {
+          const errBody = await response.text();
+          console.error("Anthropic API error:", response.status, errBody);
+          return res.status(502).json({ message: "Error al comunicarse con el servicio de IA" });
+        }
+
+        const result = await response.json();
+        const textContent = result.content?.find((c: any) => c.type === "text")?.text || "";
+
+        let parsed: any;
+        try {
+          parsed = JSON.parse(textContent.trim());
+        } catch {
+          const jsonMatch = textContent.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            parsed = JSON.parse(jsonMatch[0]);
+          } else {
+            return res.status(502).json({ message: "No se pudo interpretar la respuesta de la IA" });
+          }
+        }
+
+        res.json({
+          title: parsed.title || "",
+          description: parsed.description || "",
+          brand: parsed.brand || "",
+          confidence: parsed.confidence || "low",
+          source: "ai-vision",
+        });
+      } catch (err: any) {
+        clearTimeout(timeout);
+        if (err.name === "AbortError") {
+          return res.status(503).json({ message: "El análisis de imagen tardó demasiado. Intenta de nuevo." });
+        }
+        return res.status(503).json({ message: "Error al analizar la imagen" });
+      }
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.get("/api/products", requireAuth, async (req: Request, res: Response) => {
     try {
       const branchId = req.session.branchId;

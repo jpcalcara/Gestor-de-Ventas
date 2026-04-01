@@ -47,6 +47,7 @@ export const products = pgTable("products", {
   stock: decimal("stock", { precision: 10, scale: 3 }).notNull().default("0"),
   unitType: text("unit_type").notNull().default("unidad"),
   imageUrl: text("image_url"),
+  barcode: varchar("barcode", { length: 100 }),
 });
 
 export const paymentMethodEnum = ["efectivo", "debito", "credito", "qr", "transferencia"] as const;
@@ -375,6 +376,7 @@ export const insertProductSchema = createInsertSchema(products).omit({
   title: z.string().min(1, "El título es requerido"),
   description: z.string().min(1, "La descripción es requerida"),
   unitType: z.enum(unitTypeEnum).default("unidad"),
+  barcode: z.string().max(100).optional().or(z.literal("")),
 });
 
 export const cartItemSchema = z.object({

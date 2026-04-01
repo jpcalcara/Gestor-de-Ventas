@@ -18,24 +18,34 @@ const unitTypeLabels: Record<string, string> = {
   litros: "Litros (volumen)",
 };
 
+interface PrefillData {
+  title?: string;
+  description?: string;
+  imageUrl?: string;
+  barcode?: string;
+}
+
 interface ProductFormProps {
   product?: Product;
+  prefillData?: PrefillData;
   onSuccess?: () => void;
 }
 
-export function ProductForm({ product, onSuccess }: ProductFormProps) {
+export function ProductForm({ product, prefillData, onSuccess }: ProductFormProps) {
   const { toast } = useToast();
-  const [imagePreview, setImagePreview] = useState<string | null>(product?.imageUrl || null);
+  const initialImage = product?.imageUrl || prefillData?.imageUrl || null;
+  const [imagePreview, setImagePreview] = useState<string | null>(initialImage);
 
   const form = useForm<InsertProduct>({
     resolver: zodResolver(insertProductSchema),
     defaultValues: {
-      title: product?.title || "",
-      description: product?.description || "",
+      title: product?.title || prefillData?.title || "",
+      description: product?.description || prefillData?.description || "",
       price: product ? Number(product.price) : 0,
       stock: product ? Number(product.stock) : 0,
       unitType: (product?.unitType as typeof unitTypeEnum[number]) || "unidad",
-      imageUrl: product?.imageUrl || "",
+      imageUrl: product?.imageUrl || prefillData?.imageUrl || "",
+      barcode: product?.barcode || prefillData?.barcode || "",
     },
   });
 
@@ -139,6 +149,25 @@ export function ProductForm({ product, onSuccess }: ProductFormProps) {
                   rows={3}
                   {...field}
                   data-testid="input-product-description"
+                />
+              </FormControl>
+              <FormMessage />
+            </FormItem>
+          )}
+        />
+
+        <FormField
+          control={form.control}
+          name="barcode"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel>Código de barras</FormLabel>
+              <FormControl>
+                <Input
+                  placeholder="Ej: 7790895000118"
+                  {...field}
+                  value={field.value || ""}
+                  data-testid="input-product-barcode"
                 />
               </FormControl>
               <FormMessage />

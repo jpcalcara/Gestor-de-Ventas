@@ -45,6 +45,8 @@
     "@types/bcrypt": "^6.0.0",
     "@types/memoizee": "^0.4.12",
     "@types/multer": "^2.0.0",
+    "@zxing/browser": "^0.1.5",
+    "@zxing/library": "^0.21.3",
     "bcrypt": "^6.0.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",

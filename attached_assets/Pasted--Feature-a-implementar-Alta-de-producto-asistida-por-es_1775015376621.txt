@@ -1,0 +1,209 @@
+## Feature a implementar: Alta de producto asistida por escáner + IA
+ 
+Quiero agregar la posibilidad de dar de alta un producto nuevo escaneando su código de barras con la cámara del celular, o sacando una foto del producto, para que el sistema pre-complete automáticamente los campos del formulario (nombre, descripción, marca, imagen) sin tener que tipear todo a mano.
+ 
+---
+ 
+## Instrucciones de implementación
+ 
+### PASO 1 — Migración del schema (`shared/schema.ts`)
+ 
+Agregar el campo `barcode` a la tabla `products`:
+ 
+```ts
+barcode: varchar("barcode", { length: 100 }),
+```
+ 
+- Es opcional (nullable), único por sucursal no es necesario a nivel DB pero sí validar en el endpoint
+- Actualizar el tipo `Product` y `InsertProduct` acordemente
+- Extender `insertProductSchema` para incluir: `barcode: z.string().max(100).optional()`
+- Correr la migración con Drizzle: `npm run db:push`
+ 
+---
+ 
+### PASO 2 — Endpoint de lookup en `server/routes.ts`
+ 
+Agregar dos nuevos endpoints dentro de `registerRoutes`, protegidos con `requireAdmin`:
+ 
+#### 2a. `GET /api/product-lookup/barcode/:code`
+ 
+Busca datos del producto en la API pública **Open Food Facts** (sin API key, gratuita):
+ 
+```
+https://world.openfoodfacts.org/api/v2/product/{barcode}.json
+```
+ 
+Campos a extraer de la respuesta y devolver al frontend:
+```ts
+{
+  title: string,          // product.product_name o product.product_name_es
+  description: string,    // product.generic_name o product.categories
+  brand: string,          // product.brands
+  imageUrl: string,       // product.image_url o product.image_front_url
+  barcode: string,        // el mismo código recibido
+  source: "openfoodfacts"
+}
+```
+ 
+Si no se encuentra el producto (status != 1 o sin datos), devolver `404` con `{ message: "Producto no encontrado en la base de datos pública" }`.
+ 
+Si la API de Open Food Facts falla por timeout u otro error, devolver `503` con mensaje claro.
+ 
+Timeout máximo para la llamada externa: **5 segundos**.
+ 
+#### 2b. `POST /api/product-lookup/image`
+ 
+Recibe una imagen en base64 y la analiza con Claude Vision para identificar el producto.
+ 
+Body esperado:
+```ts
+{ imageBase64: string, mimeType: "image/jpeg" | "image/png" | "image/webp" }
+```
+ 
+Llama a la API de Anthropic (`https://api.anthropic.com/v1/messages`) usando `process.env.ANTHROPIC_API_KEY`.
+ 
+El prompt al modelo debe ser:
+```
+Analizá esta imagen de un producto de comercio minorista. 
+Respondé ÚNICAMENTE con un JSON sin markdown, con esta estructura:
+{
+  "title": "nombre comercial del producto",
+  "description": "descripción breve del producto (tipo, sabor, variante, etc.)",
+  "brand": "marca del producto",
+  "confidence": "high" | "medium" | "low"
+}
+Si no podés identificar el producto con certeza, ponés confidence: "low" e igualmente completás lo que puedas.
+```
+ 
+Modelo a usar: `claude-opus-4-5` (o el disponible en el proyecto).  
+`max_tokens`: 300.
+ 
+Devolver al frontend:
+```ts
+{
+  title: string,
+  description: string,
+  brand: string,
+  confidence: "high" | "medium" | "low",
+  source: "ai-vision"
+}
+```
+ 
+Si la imagen no es un producto o la IA no puede identificarlo, igual devolver la respuesta con `confidence: "low"`.
+ 
+---
+ 
+### PASO 3 — Componente `ProductScanner` (`client/src/components/product-scanner.tsx`)
+ 
+Crear un componente React nuevo. Debe integrarse con el sistema de diseño existente (shadcn/ui, Tailwind, Lucide, mismos estilos que el resto de la app).
+ 
+**Props:**
+```ts
+interface ProductScannerProps {
+  onProductFound: (data: ScannedProductData) => void;
+  onClose: () => void;
+}
+ 
+interface ScannedProductData {
+  title?: string;
+  description?: string;
+  brand?: string;
+  imageUrl?: string;
+  barcode?: string;
+  source: "openfoodfacts" | "ai-vision" | "manual";
+  confidence?: "high" | "medium" | "low";
+}
+```
+ 
+**Estados internos del componente:**
+ 
+1. **`idle`** — pantalla inicial con dos opciones:
+   - Botón "Escanear código de barras" (icono de barcode)
+   - Botón "Identificar por foto" (icono de cámara)
+ 
+2. **`scanning`** — activa la cámara del dispositivo para leer un código de barras usando la librería `@zxing/browser` (instalarla: `npm install @zxing/browser`). Mostrar preview de la cámara en vivo. Al detectar un código, automáticamente llama al endpoint `GET /api/product-lookup/barcode/:code` y pasa al estado `found` o `not-found`.
+ 
+3. **`photo`** — activa la cámara en modo foto (input type file con `capture="environment"`). Al seleccionar/sacar la foto, la convierte a base64 y llama a `POST /api/product-lookup/image`. Mostrar un loader mientras la IA procesa.
+ 
+4. **`found`** — muestra los datos encontrados en una preview card:
+   - Imagen del producto (si hay)
+   - Nombre, descripción, marca
+   - Badge indicando la fuente: "Open Food Facts" o "Identificado por IA" con indicador de confianza
+   - Botón "Usar estos datos" (llama a `onProductFound`)
+   - Botón "Buscar de nuevo"
+ 
+5. **`not-found`** — mensaje amigable "No encontramos este producto en las bases públicas" con opción de intentar por foto o continuar sin datos pre-cargados.
+ 
+6. **`loading`** — spinner con mensaje contextual ("Buscando producto...", "Analizando imagen con IA...")
+ 
+**Notas de implementación:**
+- Usar `apiRequest` de `@/lib/queryClient` para las llamadas al backend (ya maneja auth y headers)
+- Manejar errores de permiso de cámara con mensaje claro al usuario
+- El componente debe funcionar bien en mobile (diseñado mobile-first)
+- Al activar la cámara con `@zxing/browser`, usar `BrowserMultiFormatReader` que soporta EAN-13, EAN-8, QR, Code128, etc.
+ 
+---
+ 
+### PASO 4 — Integrar en `client/src/pages/products.tsx`
+ 
+En el componente `ProductsPage`:
+ 
+1. Agregar un botón "Escanear producto" junto al botón "+" existente. Solo visible para admins (`isAdmin`). Usar icono `ScanLine` de Lucide.
+ 
+2. Al hacer click, abrir el componente `ProductScanner` en un `Dialog` de shadcn/ui.
+ 
+3. Cuando `ProductScanner` llama a `onProductFound(data)`:
+   - Cerrar el dialog del scanner
+   - Abrir el dialog de "Agregar Producto" (`isAddDialogOpen = true`)
+   - Pasar los datos escaneados al `ProductForm` para pre-rellenar los campos
+ 
+4. El `ProductForm` debe aceptar una nueva prop opcional:
+```ts
+interface ProductFormProps {
+  product?: Product;
+  prefillData?: {
+    title?: string;
+    description?: string;
+    imageUrl?: string;
+    barcode?: string;
+  };
+  onSuccess?: () => void;
+}
+```
+Y usar `prefillData` en los `defaultValues` del `useForm` cuando no hay `product` (modo creación).
+ 
+5. Agregar el campo `barcode` al formulario de producto como campo opcional:
+   - Label: "Código de barras"
+   - Input de texto, placeholder: "Ej: 7790895000118"
+   - Debajo del campo de descripción
+   - Solo visible/editable para admins
+ 
+---
+ 
+### PASO 5 — Variable de entorno
+ 
+Verificar que `ANTHROPIC_API_KEY` esté disponible en las variables de entorno de Replit (Secrets). El endpoint de imagen debe devolver error 503 con mensaje claro si la key no está configurada.
+ 
+---
+ 
+## Resumen de archivos a crear/modificar
+ 
+| Archivo | Acción |
+|---|---|
+| `shared/schema.ts` | Agregar campo `barcode` a `products` |
+| `server/routes.ts` | Agregar endpoints `/api/product-lookup/barcode/:code` y `/api/product-lookup/image` |
+| `client/src/components/product-scanner.tsx` | Crear componente nuevo |
+| `client/src/components/product-form.tsx` | Agregar prop `prefillData` y campo `barcode` |
+| `client/src/pages/products.tsx` | Agregar botón y dialog de scanner |
+| `package.json` | Agregar dependencia `@zxing/browser` |
+ 
+---
+ 
+## Restricciones importantes
+ 
+- **No romper funcionalidad existente**: el `ProductForm` sin `prefillData` debe seguir funcionando igual que antes
+- **Respetar el multi-tenant**: los endpoints de lookup NO necesitan `branchId` (son consultas externas), pero sí requieren auth (`requireAdmin`)
+- **No modificar** el sistema de rutas, auth, ni storage existente
+- **Respetar el diseño**: usar los mismos componentes shadcn/ui, Tailwind tokens y estilos que el resto de la app (ver `design_guidelines.md`)
+- **El campo `barcode` en la DB** es nullable, no agregar constraint unique a nivel DB por ahora
+ 
