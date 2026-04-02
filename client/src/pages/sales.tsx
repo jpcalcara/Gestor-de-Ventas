@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Plus, Minus, Trash2, ShoppingCart, CreditCard, Banknote, Smartphone, ArrowRightLeft } from "lucide-react";
+import { Plus, Minus, Trash2, ShoppingCart, CreditCard, Banknote, Smartphone, ArrowRightLeft, ChevronsUpDown, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -48,6 +50,7 @@ export default function SalesPage() {
   const { branchId, branchName } = useAuth();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedProductId, setSelectedProductId] = useState<string>("");
+  const [productComboOpen, setProductComboOpen] = useState(false);
   const [quantity, setQuantity] = useState<string>("1");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("efectivo");
   const [paidAmount, setPaidAmount] = useState<string>("");
@@ -232,18 +235,51 @@ export default function SalesPage() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="md:col-span-1">
                 <Label>Producto</Label>
-                <Select value={selectedProductId} onValueChange={setSelectedProductId}>
-                  <SelectTrigger data-testid="select-product">
-                    <SelectValue placeholder="Seleccionar producto" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {productsWithStock.map((product) => (
-                      <SelectItem key={product.id} value={product.id} data-testid={`option-product-${product.id}`}>
-                        {product.title} ({formatNumber(Number(product.stock))} {unitTypeLabels[product.unitType]})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Popover open={productComboOpen} onOpenChange={setProductComboOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={productComboOpen}
+                      className="w-full justify-between font-normal"
+                      data-testid="select-product"
+                    >
+                      <span className="truncate">
+                        {selectedProduct ? selectedProduct.title : "Seleccionar producto..."}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Buscar por nombre, código..." data-testid="input-product-search" />
+                      <CommandList>
+                        <CommandEmpty>No se encontraron productos.</CommandEmpty>
+                        <CommandGroup>
+                          {productsWithStock.map((product) => (
+                            <CommandItem
+                              key={product.id}
+                              value={`${product.title} ${product.barcode ?? ""} ${product.description}`}
+                              onSelect={() => {
+                                setSelectedProductId(product.id);
+                                setProductComboOpen(false);
+                              }}
+                              data-testid={`option-product-${product.id}`}
+                            >
+                              <Check
+                                className={`mr-2 h-4 w-4 shrink-0 ${selectedProductId === product.id ? "opacity-100" : "opacity-0"}`}
+                              />
+                              <span className="flex-1 truncate">{product.title}</span>
+                              <span className="ml-2 text-xs text-muted-foreground shrink-0">
+                                {formatNumber(Number(product.stock))} {unitTypeLabels[product.unitType]}
+                              </span>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
               </div>
 
               <div>
