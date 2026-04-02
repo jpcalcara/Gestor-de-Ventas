@@ -314,64 +314,64 @@ export default function SalesPage() {
             </div>
 
             {cart.length > 0 && (
-              <div className="border rounded-lg divide-y">
-                <div className="p-3 bg-muted/50 font-medium text-sm grid grid-cols-12 gap-2">
-                  <div className="col-span-5">Producto</div>
-                  <div className="col-span-2 text-center">Cantidad</div>
-                  <div className="col-span-2 text-right">P. Unit.</div>
-                  <div className="col-span-2 text-right">Subtotal</div>
-                  <div className="col-span-1"></div>
+              <div className="border rounded-lg overflow-hidden">
+                <div className="hidden sm:flex px-3 py-2 bg-muted/50 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                  <div className="flex-1 min-w-0">Producto</div>
+                  <div className="w-32 text-center shrink-0">Cantidad</div>
+                  <div className="w-24 text-right shrink-0">P. Unit.</div>
+                  <div className="w-24 text-right shrink-0">Subtotal</div>
+                  <div className="w-8 shrink-0"></div>
                 </div>
-                {cart.map((item, index) => (
-                  <div key={index} className="p-3 grid grid-cols-12 gap-2 items-center" data-testid={`cart-item-${index}`}>
-                    <div className="col-span-5">
-                      <span className="font-medium">{item.productTitle}</span>
-                      <Badge variant="outline" className="ml-2 text-xs">
-                        {unitTypeLabels[item.unitType]}
-                      </Badge>
+                <div className="divide-y">
+                  {cart.map((item, index) => (
+                    <div key={index} className="flex items-center gap-2 px-3 py-3" data-testid={`cart-item-${index}`}>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm truncate">{item.productTitle}</p>
+                        <Badge variant="outline" className="mt-0.5 text-xs">
+                          {unitTypeLabels[item.unitType]}
+                        </Badge>
+                      </div>
+                      <div className="w-32 flex items-center justify-center gap-1 shrink-0">
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          onClick={() => updateCartQuantity(index, Number(item.quantity) - (item.unitType === "unidad" ? 1 : 0.1))}
+                          data-testid={`button-decrease-${index}`}
+                        >
+                          <Minus className="h-3 w-3" />
+                        </Button>
+                        <span className="w-10 text-center text-sm tabular-nums">
+                          {item.unitType === "unidad" ? formatNumber(Number(item.quantity)) : Number(item.quantity).toFixed(1)}
+                        </span>
+                        <Button
+                          size="icon"
+                          variant="outline"
+                          onClick={() => updateCartQuantity(index, Number(item.quantity) + (item.unitType === "unidad" ? 1 : 0.1))}
+                          data-testid={`button-increase-${index}`}
+                        >
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                      </div>
+                      <div className="w-24 text-right text-sm text-muted-foreground tabular-nums shrink-0">
+                        {formatPrice(item.unitPrice)}
+                      </div>
+                      <div className="w-24 text-right text-sm font-semibold tabular-nums shrink-0" data-testid={`text-subtotal-${index}`}>
+                        {formatPrice(item.unitPrice * Number(item.quantity))}
+                      </div>
+                      <div className="w-8 flex justify-end shrink-0">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="text-destructive"
+                          onClick={() => removeFromCart(index)}
+                          data-testid={`button-remove-${index}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
                     </div>
-                    <div className="col-span-2 flex items-center justify-center gap-1">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        onClick={() => updateCartQuantity(index, Number(item.quantity) - (item.unitType === "unidad" ? 1 : 0.1))}
-                        data-testid={`button-decrease-${index}`}
-                      >
-                        <Minus className="h-3 w-3" />
-                      </Button>
-                      <span className="w-12 text-center text-sm">
-                        {item.unitType === "unidad" ? formatNumber(Number(item.quantity)) : Number(item.quantity).toFixed(1)}
-                      </span>
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7"
-                        onClick={() => updateCartQuantity(index, Number(item.quantity) + (item.unitType === "unidad" ? 1 : 0.1))}
-                        data-testid={`button-increase-${index}`}
-                      >
-                        <Plus className="h-3 w-3" />
-                      </Button>
-                    </div>
-                    <div className="col-span-2 text-right text-sm">
-                      {formatPrice(item.unitPrice)}
-                    </div>
-                    <div className="col-span-2 text-right font-medium" data-testid={`text-subtotal-${index}`}>
-                      {formatPrice(item.unitPrice * Number(item.quantity))}
-                    </div>
-                    <div className="col-span-1 flex justify-end">
-                      <Button
-                        size="icon"
-                        variant="ghost"
-                        className="h-7 w-7 text-destructive hover:text-destructive"
-                        onClick={() => removeFromCart(index)}
-                        data-testid={`button-remove-${index}`}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
             )}
 
