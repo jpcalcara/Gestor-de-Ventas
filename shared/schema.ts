@@ -126,6 +126,7 @@ export const features = pgTable("features", {
   name: text("name").notNull(),
   description: text("description"),
   category: text("category"),
+  enabledGlobally: boolean("enabled_globally").notNull().default(true),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

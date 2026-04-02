@@ -1,0 +1,49 @@
+Quiero hacer tres cosas relacionadas:
+
+1. Reemplazar Claude/Anthropic por Gemini Flash para el reconocimiento de imágenes de productos.
+2. Agregar sugerencia de precios por búsqueda web al analizar la imagen.
+3. Implementar un sistema de Feature Flags para activar/desactivar funcionalidades por plan (Free, Starter, Pro) y globalmente desde la base de datos, sin redesplegar.
+
+---
+
+## PARTE 1 — Reemplazar Claude por Gemini Flash
+
+Instalar la dependencia @google/generative-ai en el backend. Agregar la variable de entorno GEMINI_API_KEY en .env y reemplazar cualquier referencia a ANTHROPIC_API_KEY en el código de análisis de imágenes.
+
+En el endpoint que procesa la imagen del producto, reemplazar la llamada a Anthropic por esta implementación con Gemini:
+
+import { GoogleGenerativeAI } from "@google/generative-ai"; const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!); const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" }); const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, ""); const result = await model.generateContent([{ inlineData: { mimeType: "image/jpeg", data: base64Data } }, { text: `Analizá esta imagen de un producto y devolvé ÚNICAMENTE un JSON sin markdown con este formato: { "title": "nombre corto del producto", "description": "descripción breve en 1-2 oraciones", "unitType": "unidad" }. El campo unitType debe ser uno de: "unidad", "kg", "litro", "metro", "caja", "docena". Elegí el más apropiado.` }]); const responseText = result.response.text(); const parsed = JSON.parse(responseText.replace(/```json|```/g, "").trim());
+
+---
+
+## PARTE 2 — Sugerencia de precios con Google Search Grounding
+
+Luego de identificar el producto, hacer una segunda llamada a Gemini con Google Search Grounding activado para buscar precios de referencia en Argentina:
+
+const searchModel = genAI.getGenerativeModel({ model: "gemini-1.5-flash", tools: [{ googleSearch: {} }] }); const searchResult = await searchModel.generateContent(`Buscá el precio de venta al público en Argentina de: "${parsed.title}". Devolvé ÚNICAMENTE un JSON sin markdown con este formato: { "precioSugerido": 1500, "rango": "entre $1200 y $1800", "fuente": "breve descripción de dónde se encontraron los precios" }. El precioSugerido debe ser un número representativo del precio promedio en pesos argentinos. Si no encontrás precios concretos, devolvé precioSugerido: null.`); const searchText = searchResult.response.text(); const precioData = JSON.parse(searchText.replace(/```json|```/g, "").trim());
+
+El endpoint /api/products/analyze-image debe devolver: { "title": "...", "description": "...", "unitType": "...", "priceSuggestion": { "suggested": 1500, "range": "entre $1200 y $1800", "source": "MercadoLibre, Tiendanube" } }. priceSuggestion será null si la feature está deshabilitada para el plan.
+
+En el frontend (product-form.tsx), al recibir la respuesta mostrar debajo del campo precio un helper text: "💡 Precio sugerido: $1.500 (entre $1.200 y $1.800 según mercado)" sin autocompletar el campo, solo como sugerencia visual. No mostrar nada si priceSuggestion es null.
+
+---
+
+## PARTE 3 — Sistema de Feature Flags
+
+En shared/schema.ts agregar la tabla: export const featureFlags = pgTable("feature_flags", { id: serial("id").primaryKey(), key: varchar("key", { length: 100 }).notNull().unique(), name: varchar("name", { length: 200 }).notNull(), description: text("description"), enabledGlobally: boolean("enabled_globally").notNull().default(true), availableInFree: boolean("available_in_free").notNull().default(false), availableInStarter: boolean("available_in_starter").notNull().default(false), availableInPro: boolean("available_in_pro").notNull().default(true), createdAt: timestamp("created_at").defaultNow(), updatedAt: timestamp("updated_at").defaultNow() });
+
+Correr la migración con Drizzle y hacer push a la base de datos. Insertar estos registros iniciales: (1) key: "ai_image_recognition", name: "Reconocimiento de imagen con IA", free: false, starter: true, pro: true. (2) key: "ai_price_suggestion", name: "Sugerencia de precios con búsqueda web", free: false, starter: false, pro: true.
+
+En server/features.ts crear: import { db } from "./db"; import { featureFlags } from "@shared/schema"; import { eq } from "drizzle-orm"; export type PlanType = "free" | "starter" | "pro"; export async function isFeatureEnabled(featureKey: string, plan: PlanType): Promise<boolean> { const feature = await db.select().from(featureFlags).where(eq(featureFlags.key, featureKey)).limit(1); if (!feature.length) return false; const f = feature[0]; if (!f.enabledGlobally) return false; if (plan === "free") return f.availableInFree; if (plan === "starter") return f.availableInStarter; if (plan === "pro") return f.availableInPro; return false; }
+
+En server/routes.ts agregar: app.get("/api/features", requireAuth, async (req, res) => { const plan = req.session.businessPlan as PlanType; const allFlags = await db.select().from(featureFlags); const result: Record<string, boolean> = {}; for (const flag of allFlags) { if (!flag.enabledGlobally) { result[flag.key] = false; continue; } if (plan === "free") result[flag.key] = flag.availableInFree; else if (plan === "starter") result[flag.key] = flag.availableInStarter; else result[flag.key] = flag.availableInPro; } res.json(result); }); También agregar app.patch("/api/admin/features/:key", requireSistemas, async (req, res) => { const { key } = req.params; await db.update(featureFlags).set({ ...req.body, updatedAt: new Date() }).where(eq(featureFlags.key, key)); const updated = await db.select().from(featureFlags).where(eq(featureFlags.key, key)).limit(1); res.json(updated[0]); });
+
+En client/src/hooks/use-features.ts crear: import { useQuery } from "@tanstack/react-query"; export function useFeatures() { const { data: features = {} } = useQuery({ queryKey: ["/api/features"], staleTime: 5 * 60 * 1000 }); const hasFeature = (key: string): boolean => !!features[key]; return { features, hasFeature }; }
+
+En product-form.tsx importar useFeatures y envolver el botón de analizar imagen: const { hasFeature } = useFeatures(); {hasFeature("ai_image_recognition") && <Button onClick={handleAnalyzeImage}>Analizar con IA</Button>}
+
+En el backend, antes de ejecutar la búsqueda de precios verificar: const canUsePriceSuggestion = await isFeatureEnabled("ai_price_suggestion", req.session.businessPlan); y solo correr la búsqueda si canUsePriceSuggestion es true. También verificar ai_image_recognition antes de ejecutar el análisis de imagen principal.
+
+Agregar en la sección de configuración del sistema (solo rol "sistemas") una pantalla que liste todas las feature flags en una tabla con toggles para activar/desactivar globalmente y por cada plan (Free, Starter, Pro), guardando cambios en tiempo real via el endpoint PATCH.
+
+No modificar ninguna funcionalidad existente. Cualquier feature nueva que se agregue a futuro debe seguir este mismo patrón: insertar registro en feature_flags, usar isFeatureEnabled() en backend y hasFeature() en frontend.
