@@ -61,6 +61,8 @@ export const saleOrders = pgTable("sale_orders", {
   paidAmount: decimal("paid_amount", { precision: 10, scale: 2 }),
   changeAmount: decimal("change_amount", { precision: 10, scale: 2 }),
   totalAmount: decimal("total_amount", { precision: 10, scale: 2 }).notNull(),
+  transferVoucherUrl: text("transfer_voucher_url"),
+  mpPaymentId: text("mp_payment_id"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -155,6 +157,13 @@ export const businesses = pgTable("businesses", {
   mpSubscriptionId: text("mp_subscription_id"),
   mpPayerId: text("mp_payer_id"),
   mpStatus: text("mp_status"),
+  // MP Connect OAuth (per-business)
+  mpAccessToken: text("mp_access_token"),
+  mpRefreshToken: text("mp_refresh_token"),
+  mpUserId: text("mp_user_id"),
+  mpPublicKey: text("mp_public_key"),
+  mpConnectedAt: timestamp("mp_connected_at"),
+  mpExpiresAt: timestamp("mp_expires_at"),
   subscriptionStatus: text("subscription_status").notNull().default("trial"),
   trialEndsAt: timestamp("trial_ends_at"),
   graceEndsAt: timestamp("grace_ends_at"),

@@ -54,6 +54,12 @@ app.use(express.json({
 }));
 app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 
+import path from "path";
+import fs from "fs";
+const vouchersDir = path.join(process.cwd(), "public", "vouchers");
+if (!fs.existsSync(vouchersDir)) fs.mkdirSync(vouchersDir, { recursive: true });
+app.use("/vouchers", express.static(vouchersDir));
+
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;

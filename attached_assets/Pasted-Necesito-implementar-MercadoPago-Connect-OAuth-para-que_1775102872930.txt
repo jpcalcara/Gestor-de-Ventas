@@ -1,0 +1,231 @@
+Necesito implementar MercadoPago Connect (OAuth) para que cada negocio (business) pueda conectar su propia cuenta de MercadoPago. Los vendedores de ese negocio usan las credenciales del negocio para procesar pagos. El flujo es el estándar de marketplace/plataforma de MP.
+
+---
+
+CONTEXTO DEL PROYECTO
+
+- Multi-tenant: businesses → branches → users (roles: sistemas/admin/vendedor)
+- Schema: tabla businesses, tabla branches (con businessId FK), tabla users
+- Stack: React 18 + TanStack Query v5 + shadcn/ui / Node + Express + Drizzle ORM + PostgreSQL
+- MercadoPago SDK ya instalado (mercadopago npm package)
+- paymentMethodEnum ya existe: ["efectivo", "debito", "credito", "qr", "transferencia"]
+
+---
+
+1. SCHEMA – Nuevas columnas en tabla businesses
+
+En shared/schema.ts, agregar a la tabla businesses:
+
+  mpAccessToken: text("mp_access_token"),
+  mpRefreshToken: text("mp_refresh_token"),
+  mpUserId: text("mp_user_id"),
+  mpPublicKey: text("mp_public_key"),
+  mpConnectedAt: timestamp("mp_connected_at"),
+  mpExpiresAt: timestamp("mp_expires_at"),
+
+Hacer la migración con Drizzle (npx drizzle-kit push).
+
+---
+
+2. VARIABLES DE ENTORNO
+
+Agregar al .env:
+
+  MP_APP_ID=...
+  MP_CLIENT_SECRET=...
+  MP_REDIRECT_URI=...   -- ej: https://tu-app.replit.app/api/mercadopago/callback
+
+Estas son las credenciales de LA PLATAFORMA (del dueño del sistema), no del negocio.
+
+---
+
+3. BACKEND – Endpoints OAuth
+
+GET /api/mercadopago/connect
+- requireAuth, solo roles "admin" o "sistemas"
+- Construye la URL de autorización de MercadoPago:
+  https://auth.mercadopago.com/authorization?client_id={MP_APP_ID}&response_type=code&platform_id=mp&redirect_uri={MP_REDIRECT_URI}&state={businessId}
+- El campo state debe ser el businessId del admin logueado (req.session.businessId)
+- Retorna: { authUrl: string }
+
+GET /api/mercadopago/callback
+- Ruta pública (es el redirect de MP, no requiere sesión)
+- Recibe query params: code, state (que contiene el businessId)
+- Llama a la API de MP para intercambiar el code por tokens:
+  POST https://api.mercadopago.com/oauth/token
+  Body: { client_id: MP_APP_ID, client_secret: MP_CLIENT_SECRET, code, grant_type: "authorization_code", redirect_uri: MP_REDIRECT_URI }
+- Guarda en la tabla businesses: mpAccessToken, mpRefreshToken, mpUserId, mpPublicKey, mpConnectedAt, mpExpiresAt
+- Redirige al frontend a /settings?mp=connected en caso de éxito, /settings?mp=error en caso de fallo
+
+DELETE /api/mercadopago/disconnect
+- requireAuth, solo admin/sistemas
+- Limpia todas las columnas mp* del business del admin logueado poniéndolas en null
+- Retorna: { success: true }
+
+GET /api/mercadopago/status
+- requireAuth
+- Retorna si el business del usuario logueado tiene MP conectado:
+  { connected: boolean, mpUserId: string | null, connectedAt: string | null }
+- NUNCA retornar el access token ni el refresh token al frontend
+
+---
+
+4. BACKEND – Helper para credenciales MP del negocio
+
+Crear server/mercadopago.ts con una función helper:
+
+export async function getMPClientForBusiness(businessId: string) {
+  // 1. Obtiene el business de la DB
+  // 2. Verifica que tenga mpAccessToken, si no lanza error descriptivo
+  // 3. Si mpExpiresAt está a menos de 1 hora de vencer, hacer refresh automático:
+  //    POST https://api.mercadopago.com/oauth/token con grant_type: "refresh_token"
+  //    Actualizar mpAccessToken, mpRefreshToken y mpExpiresAt en la DB
+  // 4. Retorna instancia del SDK de MercadoPago configurada con el access token del negocio
+}
+
+---
+
+5. BACKEND – Endpoints de pago usando credenciales del negocio
+
+POST /api/mercadopago/create-preference
+- requireAuth
+- Obtiene businessId desde req.session.businessId
+- Usa getMPClientForBusiness(businessId) para procesar con las credenciales del NEGOCIO
+- Recibe body: { items: CartItem[], paymentMethod: 'debito' | 'credito' | 'qr' }
+- Para debito/credito: crea preferencia de pago estándar de MP
+- Para qr: usa la API de QR instore de MP con el access token del negocio
+- Retorna: { preferenceId, initPoint, qrData } (qrData solo para QR)
+
+GET /api/mercadopago/payment-status/:paymentId
+- requireAuth
+- Usa getMPClientForBusiness con el businessId del usuario logueado
+- Retorna: { status: 'pending' | 'approved' | 'rejected' }
+
+POST /api/sale-orders/:orderId/transfer-voucher
+- requireAuth
+- Recibe multipart/form-data con campo "image" (archivo de imagen)
+- Usar multer para manejar el upload (instalar si no está)
+- Guardar la imagen en /public/vouchers/ con nombre único (uuid + extensión original)
+- Actualizar la columna transferVoucherUrl de la sale_order correspondiente
+- Validar que la sale_order pertenezca a la branch del usuario logueado
+- Retorna: { voucherUrl: string }
+
+---
+
+6. SCHEMA ADICIONAL – Columna para comprobante de transferencia
+
+En shared/schema.ts, agregar a la tabla saleOrders:
+
+  transferVoucherUrl: text("transfer_voucher_url"),   -- nullable
+
+Hacer la migración con Drizzle (npx drizzle-kit push).
+
+---
+
+7. FRONTEND – Sección de configuración MP para el admin
+
+En la página de configuración del negocio (settings o donde corresponda), agregar una tarjeta "MercadoPago":
+
+Usar useQuery con queryKey ["/api/mercadopago/status"] para obtener el estado actual.
+
+Estado DESCONECTADO:
+- Ícono de MercadoPago + texto "Conectá tu cuenta de MercadoPago para cobrar con débito, crédito y QR"
+- Botón "Conectar MercadoPago" que llama a GET /api/mercadopago/connect y redirige el navegador a la authUrl retornada (window.location.href = authUrl)
+
+Estado CONECTADO:
+- Checkmark verde + "Cuenta conectada" + fecha de conexión formateada
+- Mostrar el mpUserId como referencia de la cuenta vinculada
+- Botón "Desconectar" con Dialog de confirmación que llama a DELETE /api/mercadopago/disconnect
+
+Al cargar la página:
+- Si la URL tiene query param ?mp=connected → mostrar toast de éxito "MercadoPago conectado exitosamente" y limpiar el query param de la URL
+- Si tiene ?mp=error → mostrar toast de error "Error al conectar MercadoPago" y limpiar el query param
+
+Solo mostrar esta sección a usuarios con rol "admin" o "sistemas".
+
+---
+
+8. FRONTEND – Modal de cobro en ventas (sales.tsx)
+
+Modificar el botón "Confirmar Venta" en client/src/pages/sales.tsx para que, en lugar de llamar directamente a createOrderMutation, abra un Dialog/Modal con el siguiente comportamiento según el paymentMethod seleccionado:
+
+PARA "debito" o "credito":
+- Al abrir el modal, verificar que el business tenga MP conectado (GET /api/mercadopago/status)
+- Si no está conectado: mostrar alerta "El negocio no tiene MercadoPago configurado. Contactá al administrador." con opción de cerrar
+- Si está conectado:
+  - Mostrar el monto total prominentemente
+  - Botón "Pagar con MercadoPago" que llama a POST /api/mercadopago/create-preference
+  - Abrir la initPoint retornada en una nueva ventana/tab
+  - Mostrar spinner "Esperando confirmación de pago..."
+  - Polling cada 3 segundos a GET /api/mercadopago/payment-status/:paymentId
+  - Limpiar el polling con clearInterval cuando el componente se desmonte (useEffect cleanup)
+  - Cuando status === 'approved': llamar a createOrderMutation y cerrar el modal mostrando éxito
+  - Cuando status === 'rejected': mostrar error con opción de reintentar o cambiar método de pago
+
+PARA "qr":
+- Al abrir el modal, verificar que el business tenga MP conectado
+- Si no está conectado: mismo mensaje que debito/credito
+- Si está conectado:
+  - Llamar automáticamente a POST /api/mercadopago/create-preference al abrir el modal
+  - Mostrar el QR code usando el componente qrcode.react (instalar con: npm install qrcode.react)
+  - Mostrar el monto total prominentemente debajo del QR
+  - Mostrar un timer de cuenta regresiva de 10 minutos (los QR de MP expiran)
+  - Polling cada 3 segundos a GET /api/mercadopago/payment-status/:paymentId
+  - Limpiar el polling y el timer con cleanup en useEffect
+  - Cuando status === 'approved': registrar la venta y mostrar éxito
+  - Cuando el timer llega a 0: mostrar botón "Generar nuevo QR" que repite el proceso
+
+PARA "transferencia":
+- Mostrar botón "Abrir Cámara"
+- Al hacer click, usar navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } })
+- Mostrar el stream en un elemento <video> con autoPlay y playsInline
+- Botón "Capturar Foto" que:
+  - Dibuja el frame actual del video en un <canvas> oculto
+  - Obtiene la imagen con canvas.toDataURL('image/jpeg', 0.8)
+  - Detiene el stream de video (stopStream)
+  - Muestra la imagen capturada en un <img> como preview
+- Botones "Repetir" (vuelve a abrir la cámara) y "Confirmar"
+- Fallback si navigator.mediaDevices no está disponible o el usuario deniega el permiso:
+  - Mostrar <input type="file" accept="image/*" capture="environment" /> con texto "Subir imagen del comprobante"
+  - Mostrar preview de la imagen seleccionada antes de confirmar
+- Al confirmar:
+  - Primero llamar a createOrderMutation para registrar la venta
+  - Con el ID de la orden retornada, hacer POST a /api/sale-orders/:orderId/transfer-voucher con la imagen como FormData
+  - Mostrar éxito al completar ambas operaciones
+
+PARA "efectivo":
+- Mantener exactamente el flujo actual sin ningún cambio (input de monto recibido y cálculo de vuelto)
+
+---
+
+9. UI / UX GENERAL
+
+- Todos los modales deben usar los componentes Dialog de shadcn/ui ya existentes en el proyecto
+- Usar los colores, tipografía y estilos de Tailwind ya definidos en el proyecto
+- Mostrar siempre el monto total de la venta prominentemente en el modal de cobro
+- Usar los componentes Spinner/Skeleton ya existentes en el proyecto para estados de carga
+- En caso de error de la API de MercadoPago, mostrar mensaje claro con opción de reintentar
+- El modal de cámara debe funcionar correctamente en mobile (caso de uso principal)
+- No mostrar la opción de cobrar con MP si el business no tiene MP conectado (deshabilitar o mostrar alerta)
+
+---
+
+10. SEGURIDAD
+
+- Nunca exponer mpAccessToken, mpRefreshToken ni MP_CLIENT_SECRET al frontend bajo ninguna circunstancia
+- Los endpoints de pago deben validar que el businessId del usuario logueado sea el dueño de las credenciales MP que se usan
+- Solo roles "admin" y "sistemas" pueden conectar/desconectar MercadoPago
+- Los vendedores usan MP de forma transparente sin acceso a ninguna credencial
+- Validar en el backend que cada sale_order pertenece a la branch/business del usuario antes de subir el voucher
+
+---
+
+FLUJO COMPLETO ESPERADO:
+
+1. El dueño del sistema crea su App en developers.mercadopago.com (tipo Marketplace) y obtiene MP_APP_ID y MP_CLIENT_SECRET
+2. El admin de cada negocio va a Configuración → hace click en "Conectar MercadoPago"
+3. Se redirige al flujo OAuth de MercadoPago donde el admin autoriza el acceso
+4. MercadoPago redirige de vuelta al sistema con un code, el backend lo intercambia por tokens y los guarda en la DB del negocio
+5. A partir de ese momento, cuando un vendedor de ese negocio registra una venta y elige débito, crédito o QR, el sistema usa automáticamente las credenciales MP del negocio
+6. El vendedor nunca ve ni maneja ninguna credencial, solo elige el método de pago y confirma
+7. El cobro se acredita directamente en la cuenta de MercadoPago del negocio

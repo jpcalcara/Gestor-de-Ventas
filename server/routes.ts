@@ -1,11 +1,12 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertSaleSchema, updateSaleSchema, updateCompanySettingsSchema, insertBranchSchema, updateBranchSchema, insertBranchStockSchema, updateUserBranchesSchema, insertInvitationSchema, updatePlanSchema, insertFeatureSchema, registerBusinessSchema, features as featuresFlagsTable, planFeatures as planFeaturesTable } from "@shared/schema";
+import { insertProductSchema, insertSaleSchema, updateSaleSchema, updateCompanySettingsSchema, insertBranchSchema, updateBranchSchema, insertBranchStockSchema, updateUserBranchesSchema, insertInvitationSchema, updatePlanSchema, insertFeatureSchema, registerBusinessSchema, features as featuresFlagsTable, planFeatures as planFeaturesTable, businesses as businessesTable, saleOrders as saleOrdersTable } from "@shared/schema";
 import { fromError } from "zod-validation-error";
 import { registerAuthRoutes, requireAuth, requireAdmin, hashPassword } from "./auth";
 import { generateSlug } from "./utils";
 import { requireFeatureMiddleware, getBusinessFeatures, checkFeatureLimit, invalidateFeatureCache, requireActiveSubscription, isFeatureEnabledForBusiness } from "./features";
+import { getMPClientForBusiness, getBusinessMPStatus } from "./mercadopago";
 import { db } from "./db";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
@@ -2299,6 +2300,225 @@ precioSugerido es un número. No incluyas el símbolo $. Si no encontrás datos 
       if (!businessId) return res.json([]);
       const events = await storage.getSubscriptionEvents(businessId);
       res.json(events);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ─── MercadoPago Connect OAuth ────────────────────────────────────────────
+
+  // GET /api/mercadopago/connect  — returns the MP authorization URL
+  app.get("/api/mercadopago/connect", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const role = req.session.userRole;
+      if (role !== "admin" && role !== "sistemas") {
+        return res.status(403).json({ message: "Solo administradores pueden conectar MercadoPago" });
+      }
+      const businessId = req.session.businessId;
+      if (!businessId) return res.status(400).json({ message: "Sin negocio asociado" });
+      const appId = process.env.MP_APP_ID;
+      const redirectUri = process.env.MP_REDIRECT_URI;
+      if (!appId || !redirectUri) {
+        return res.status(500).json({ message: "MP_APP_ID o MP_REDIRECT_URI no configurados" });
+      }
+      const authUrl = `https://auth.mercadopago.com/authorization?client_id=${appId}&response_type=code&platform_id=mp&redirect_uri=${encodeURIComponent(redirectUri)}&state=${businessId}`;
+      res.json({ authUrl });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // GET /api/mercadopago/callback  — public, receives code + state from MP
+  app.get("/api/mercadopago/callback", async (req: Request, res: Response) => {
+    const { code, state: businessId } = req.query as Record<string, string>;
+    const frontendBase = process.env.MP_BACK_URL || "http://localhost:5000";
+    if (!code || !businessId) {
+      return res.redirect(`${frontendBase}/settings?mp=error`);
+    }
+    try {
+      const tokenRes = await fetch("https://api.mercadopago.com/oauth/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          client_id: process.env.MP_APP_ID,
+          client_secret: process.env.MP_CLIENT_SECRET,
+          code,
+          grant_type: "authorization_code",
+          redirect_uri: process.env.MP_REDIRECT_URI,
+        }),
+      });
+      if (!tokenRes.ok) {
+        console.error("MP token exchange failed:", await tokenRes.text());
+        return res.redirect(`${frontendBase}/settings?mp=error`);
+      }
+      const data = await tokenRes.json() as any;
+      const expiresAt = new Date(Date.now() + (data.expires_in ?? 21600) * 1000);
+      await db.update(businessesTable).set({
+        mpAccessToken: data.access_token,
+        mpRefreshToken: data.refresh_token ?? null,
+        mpUserId: String(data.user_id ?? ""),
+        mpPublicKey: data.public_key ?? null,
+        mpConnectedAt: new Date(),
+        mpExpiresAt: expiresAt,
+      }).where(eq(businessesTable.id, businessId));
+      return res.redirect(`${frontendBase}/settings?mp=connected`);
+    } catch (error: any) {
+      console.error("MP callback error:", error);
+      return res.redirect(`${frontendBase}/settings?mp=error`);
+    }
+  });
+
+  // DELETE /api/mercadopago/disconnect  — clears all MP* fields for the business
+  app.delete("/api/mercadopago/disconnect", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const role = req.session.userRole;
+      if (role !== "admin" && role !== "sistemas") {
+        return res.status(403).json({ message: "Solo administradores pueden desconectar MercadoPago" });
+      }
+      const businessId = req.session.businessId;
+      if (!businessId) return res.status(400).json({ message: "Sin negocio asociado" });
+      await db.update(businessesTable).set({
+        mpAccessToken: null,
+        mpRefreshToken: null,
+        mpUserId: null,
+        mpPublicKey: null,
+        mpConnectedAt: null,
+        mpExpiresAt: null,
+      }).where(eq(businessesTable.id, businessId));
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // GET /api/mercadopago/status  — check if business has MP connected (never exposes tokens)
+  app.get("/api/mercadopago/status", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const businessId = req.session.businessId;
+      if (!businessId) return res.json({ connected: false, mpUserId: null, connectedAt: null });
+      const status = await getBusinessMPStatus(businessId);
+      res.json(status);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ─── MercadoPago Payments ─────────────────────────────────────────────────
+
+  // POST /api/mercadopago/create-preference
+  app.post("/api/mercadopago/create-preference", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const businessId = req.session.businessId;
+      if (!businessId) return res.status(400).json({ message: "Sin negocio asociado" });
+      const { items, paymentMethod } = req.body;
+      if (!items || !Array.isArray(items) || items.length === 0) {
+        return res.status(400).json({ message: "items es requerido" });
+      }
+      const mp = await getMPClientForBusiness(businessId);
+      const mpItems = items.map((item: any) => ({
+        id: item.productId,
+        title: item.productTitle,
+        quantity: Number(item.quantity),
+        unit_price: Number(item.unitPrice),
+        currency_id: "ARS",
+      }));
+      const backUrl = process.env.MP_BACK_URL || "http://localhost:5000";
+      if (paymentMethod === "qr") {
+        const totalAmount = items.reduce((sum: number, item: any) => sum + Number(item.unitPrice) * Number(item.quantity), 0);
+        const pref = await mp.preference.create({
+          body: {
+            items: mpItems,
+            payment_methods: { excluded_payment_types: [{ id: "ticket" }, { id: "atm" }] },
+            back_urls: { success: `${backUrl}/sales?mp_status=approved`, failure: `${backUrl}/sales?mp_status=rejected` },
+            auto_return: "approved",
+          },
+        });
+        return res.json({
+          preferenceId: pref.id,
+          initPoint: pref.init_point,
+          qrData: pref.init_point,
+        });
+      } else {
+        const pref = await mp.preference.create({
+          body: {
+            items: mpItems,
+            payment_methods: {
+              excluded_payment_types: paymentMethod === "debito"
+                ? [{ id: "credit_card" }, { id: "ticket" }, { id: "atm" }]
+                : [{ id: "debit_card" }, { id: "ticket" }, { id: "atm" }],
+            },
+            back_urls: { success: `${backUrl}/sales?mp_status=approved`, failure: `${backUrl}/sales?mp_status=rejected` },
+            auto_return: "approved",
+          },
+        });
+        return res.json({ preferenceId: pref.id, initPoint: pref.init_point });
+      }
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // GET /api/mercadopago/payment-status/:paymentId
+  app.get("/api/mercadopago/payment-status/:paymentId", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const businessId = req.session.businessId;
+      if (!businessId) return res.status(400).json({ message: "Sin negocio asociado" });
+      const mp = await getMPClientForBusiness(businessId);
+      const paymentId = req.params.paymentId;
+      const isNumeric = /^\d+$/.test(paymentId);
+      if (isNumeric) {
+        const payment = await mp.payment.get({ id: Number(paymentId) });
+        return res.json({ status: payment.status ?? "pending" });
+      }
+      // Search by preference_id (for QR/preference-based polling)
+      const searchRes = await fetch(
+        `https://api.mercadopago.com/v1/payments/search?preference_id=${paymentId}&sort=date_created&criteria=desc&range=date_created&limit=1`,
+        { headers: { Authorization: `Bearer ${mp.accessToken}` } }
+      );
+      if (!searchRes.ok) return res.json({ status: "pending" });
+      const searchData = await searchRes.json() as any;
+      const latest = searchData?.results?.[0];
+      res.json({ status: latest?.status ?? "pending" });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ─── Transfer Voucher Upload ──────────────────────────────────────────────
+
+  const vouchersDir = path.join(process.cwd(), "public", "vouchers");
+  if (!fs.existsSync(vouchersDir)) fs.mkdirSync(vouchersDir, { recursive: true });
+
+  const voucherStorage = multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, vouchersDir),
+    filename: (_req, file, cb) => {
+      const unique = crypto.randomUUID();
+      cb(null, unique + path.extname(file.originalname));
+    },
+  });
+  const voucherUpload = multer({
+    storage: voucherStorage,
+    limits: { fileSize: 10 * 1024 * 1024 },
+    fileFilter: (_req, file, cb) => {
+      const ok = /jpeg|jpg|png|gif|webp/.test(path.extname(file.originalname).toLowerCase())
+        && /image/.test(file.mimetype);
+      cb(null, ok);
+    },
+  });
+
+  app.post("/api/sale-orders/:orderId/transfer-voucher", requireAuth, voucherUpload.single("image"), async (req: Request, res: Response) => {
+    try {
+      if (!req.file) return res.status(400).json({ message: "No se recibió imagen" });
+      const userId = req.session.userId!;
+      const branchId = req.session.branchId;
+      const [order] = await db.select().from(saleOrdersTable).where(eq(saleOrdersTable.id, req.params.orderId));
+      if (!order) return res.status(404).json({ message: "Orden no encontrada" });
+      if (branchId && order.branchId !== branchId && req.session.userRole === "vendedor") {
+        return res.status(403).json({ message: "Sin permiso para esta orden" });
+      }
+      const voucherUrl = `/vouchers/${req.file.filename}`;
+      await db.update(saleOrdersTable).set({ transferVoucherUrl: voucherUrl }).where(eq(saleOrdersTable.id, req.params.orderId));
+      res.json({ voucherUrl });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
