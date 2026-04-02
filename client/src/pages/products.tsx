@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Plus, Search, Edit, Trash2, PackageX, Package, ScanLine, Barcode } from "lucide-react";
+import { Plus, Search, Edit, Trash2, PackageX, Package, ScanLine, Barcode, FileUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { ProductForm } from "@/components/product-form";
 import { ProductScanner, type ScannedProductData } from "@/components/product-scanner";
 import { DeleteProductDialog } from "@/components/delete-product-dialog";
+import { ProductImportDialog } from "@/components/product-import-dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatPrice, formatNumber, isLowStock } from "@/lib/format";
 import { useAuth } from "@/lib/auth";
@@ -31,6 +32,7 @@ export default function ProductsPage() {
     barcode?: string;
   } | undefined>(undefined);
   const [priceSuggestion, setPriceSuggestion] = useState<{ suggested: number; range: string; source: string } | null>(null);
+  const [isImportOpen, setIsImportOpen] = useState(false);
 
   const { data: products, isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
@@ -108,6 +110,11 @@ export default function ProductsPage() {
               </DialogContent>
             </Dialog>
 
+            <Button variant="outline" onClick={() => setIsImportOpen(true)} data-testid="button-import-products">
+              <FileUp className="h-4 w-4 mr-2" />
+              Importar CSV
+            </Button>
+
             <Dialog open={isAddDialogOpen} onOpenChange={(open) => {
               setIsAddDialogOpen(open);
               if (!open) setPrefillData(undefined);
@@ -125,6 +132,8 @@ export default function ProductsPage() {
                 <ProductForm prefillData={prefillData} priceSuggestion={priceSuggestion} onSuccess={handleAddSuccess} />
               </DialogContent>
             </Dialog>
+
+            <ProductImportDialog open={isImportOpen} onOpenChange={setIsImportOpen} />
           </div>
         )}
       </div>

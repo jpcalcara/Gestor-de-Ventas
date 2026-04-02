@@ -415,6 +415,83 @@ precioSugerido es un número. No incluyas el símbolo $. Si no encontrás datos 
     }
   });
 
+  app.post("/api/products/import", requireAdmin, async (req: Request, res: Response) => {
+    try {
+      const branchId = req.session.branchId;
+      if (!branchId) {
+        return res.status(400).json({ message: "Debe seleccionar una sucursal primero" });
+      }
+
+      const { products: rows } = req.body;
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return res.status(400).json({ message: "No se recibieron productos para importar" });
+      }
+
+      const results: { row: number; title: string; success: boolean; error?: string }[] = [];
+
+      for (let i = 0; i < rows.length; i++) {
+        const row = rows[i];
+        const rowNum = i + 2; // +2: header row + 1-indexed
+        const title = String(row.title || "");
+
+        try {
+          const parsed = insertProductSchema.safeParse(row);
+          if (!parsed.success) {
+            const errMsg = fromError(parsed.error).message;
+            results.push({ row: rowNum, title, success: false, error: errMsg });
+            continue;
+          }
+
+          const existingTitle = await storage.getProductByTitle(parsed.data.title, branchId);
+          if (existingTitle) {
+            results.push({ row: rowNum, title, success: false, error: `Ya existe un producto con el nombre "${parsed.data.title}"` });
+            continue;
+          }
+
+          if (parsed.data.barcode && parsed.data.barcode.trim() !== "") {
+            const existingBarcode = await storage.getProductByBarcode(parsed.data.barcode.trim(), branchId);
+            if (existingBarcode) {
+              results.push({ row: rowNum, title, success: false, error: `El código de barras "${parsed.data.barcode}" ya pertenece a "${existingBarcode.title}"` });
+              continue;
+            }
+          }
+
+          const product = await storage.createProduct({ ...parsed.data, branchId });
+
+          if (parsed.data.stock !== undefined) {
+            await storage.upsertBranchStock({
+              branchId,
+              productId: product.id,
+              stock: String(parsed.data.stock),
+              lowStockThreshold: null,
+            });
+          }
+
+          results.push({ row: rowNum, title: product.title, success: true });
+        } catch (err: any) {
+          results.push({ row: rowNum, title, success: false, error: err.message });
+        }
+      }
+
+      const successCount = results.filter((r) => r.success).length;
+      if (successCount > 0) {
+        await createAuditLog(
+          req.session.userId!,
+          req.session.userName!,
+          "crear",
+          "producto",
+          "bulk",
+          `Importación CSV: ${successCount} producto(s) importado(s)`,
+          branchId
+        );
+      }
+
+      res.json({ results });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.get("/api/sales", requireAuth, async (req: Request, res: Response) => {
     try {
       const branchId = req.session.branchId;
