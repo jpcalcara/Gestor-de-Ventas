@@ -1,11 +1,12 @@
-import { useRef, useEffect } from "react";
+import { useRef, useEffect, useState } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { Building2, Upload, Save, Image as ImageIcon, CheckCircle2, AlertCircle, LinkIcon, Unlink } from "lucide-react";
+import { Building2, Upload, Save, Image as ImageIcon, CheckCircle2, AlertCircle, Unlink, Eye, EyeOff } from "lucide-react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
@@ -13,14 +14,18 @@ import { z } from "zod";
 import type { CompanySettings } from "@shared/schema";
 import { useAuth } from "@/lib/auth";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { useState } from "react";
 import { SiMercadopago } from "react-icons/si";
 
 const companyNameSchema = z.object({
   companyName: z.string().min(1, "El nombre de la empresa es requerido"),
 });
-
 type CompanyNameFormData = z.infer<typeof companyNameSchema>;
+
+const mpTokenSchema = z.object({
+  accessToken: z.string().min(10, "Ingresá el Access Token de producción"),
+  publicKey: z.string().optional(),
+});
+type MPTokenFormData = z.infer<typeof mpTokenSchema>;
 
 interface MPStatus {
   connected: boolean;
@@ -33,6 +38,7 @@ export default function SettingsPage() {
   const { isAdmin } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [disconnectDialogOpen, setDisconnectDialogOpen] = useState(false);
+  const [showToken, setShowToken] = useState(false);
 
   const { data: settings, isLoading } = useQuery<CompanySettings>({
     queryKey: ["/api/company-settings"],
@@ -59,16 +65,21 @@ export default function SettingsPage() {
     }
   }, []);
 
-  const form = useForm<CompanyNameFormData>({
+  const nameForm = useForm<CompanyNameFormData>({
     resolver: zodResolver(companyNameSchema),
     defaultValues: { companyName: settings?.companyName || "JOTA Sistemas" },
     values: { companyName: settings?.companyName || "JOTA Sistemas" },
   });
 
+  const mpForm = useForm<MPTokenFormData>({
+    resolver: zodResolver(mpTokenSchema),
+    defaultValues: { accessToken: "", publicKey: "" },
+  });
+
   const updateNameMutation = useMutation({
     mutationFn: async (data: CompanyNameFormData) => apiRequest("PATCH", "/api/company-settings", data),
     onSuccess: () => {
-      toast({ title: "Nombre actualizado", description: "El nombre de la empresa se ha actualizado correctamente" });
+      toast({ title: "Nombre actualizado" });
       queryClient.invalidateQueries({ queryKey: ["/api/company-settings"] });
     },
     onError: (error: Error) => toast({ title: "Error", description: error.message, variant: "destructive" }),
@@ -79,28 +90,29 @@ export default function SettingsPage() {
       const formData = new FormData();
       formData.append("image", file);
       const response = await fetch("/api/upload/logo", { method: "POST", body: formData, credentials: "include" });
-      if (!response.ok) {
-        const error = await response.json();
-        throw new Error(error.message || "Error al subir la imagen");
-      }
+      if (!response.ok) { const e = await response.json(); throw new Error(e.message || "Error al subir la imagen"); }
       return response.json();
     },
     onSuccess: () => {
-      toast({ title: "Logo actualizado", description: "El logo de la empresa se ha actualizado correctamente" });
+      toast({ title: "Logo actualizado" });
       queryClient.invalidateQueries({ queryKey: ["/api/company-settings"] });
     },
     onError: (error: Error) => toast({ title: "Error", description: error.message, variant: "destructive" }),
   });
 
   const connectMPMutation = useMutation({
-    mutationFn: async () => {
-      const res = await apiRequest("GET", "/api/mercadopago/connect");
-      return res as { authUrl: string };
+    mutationFn: async (data: MPTokenFormData) =>
+      apiRequest("POST", "/api/mercadopago/connect-manual", {
+        accessToken: data.accessToken,
+        publicKey: data.publicKey || undefined,
+      }),
+    onSuccess: () => {
+      toast({ title: "MercadoPago conectado exitosamente" });
+      mpForm.reset();
+      setShowToken(false);
+      queryClient.invalidateQueries({ queryKey: ["/api/mercadopago/status"] });
     },
-    onSuccess: (data) => {
-      window.location.href = data.authUrl;
-    },
-    onError: (error: Error) => toast({ title: "Error", description: error.message, variant: "destructive" }),
+    onError: (error: Error) => toast({ title: "Error al conectar", description: error.message, variant: "destructive" }),
   });
 
   const disconnectMPMutation = useMutation({
@@ -112,11 +124,6 @@ export default function SettingsPage() {
     },
     onError: (error: Error) => toast({ title: "Error", description: error.message, variant: "destructive" }),
   });
-
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (file) uploadLogoMutation.mutate(file);
-  };
 
   if (isLoading) {
     return (
@@ -134,6 +141,7 @@ export default function SettingsPage() {
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
+        {/* Nombre */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -143,10 +151,10 @@ export default function SettingsPage() {
             <CardDescription>Este nombre aparecerá en el login y en la navegación</CardDescription>
           </CardHeader>
           <CardContent>
-            <Form {...form}>
-              <form onSubmit={form.handleSubmit((d) => updateNameMutation.mutate(d))} className="space-y-4">
+            <Form {...nameForm}>
+              <form onSubmit={nameForm.handleSubmit((d) => updateNameMutation.mutate(d))} className="space-y-4">
                 <FormField
-                  control={form.control}
+                  control={nameForm.control}
                   name="companyName"
                   render={({ field }) => (
                     <FormItem>
@@ -167,6 +175,7 @@ export default function SettingsPage() {
           </CardContent>
         </Card>
 
+        {/* Logo */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -179,7 +188,7 @@ export default function SettingsPage() {
             <input
               type="file"
               ref={fileInputRef}
-              onChange={handleFileChange}
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) uploadLogoMutation.mutate(f); }}
               accept="image/jpeg,image/png,image/gif,image/webp"
               className="hidden"
               data-testid="input-logo-file"
@@ -200,10 +209,11 @@ export default function SettingsPage() {
                 </Button>
               </div>
             </div>
-            <p className="text-xs text-muted-foreground">Formatos permitidos: JPEG, PNG, GIF, WebP. Tamaño máximo: 5MB.</p>
+            <p className="text-xs text-muted-foreground">Formatos: JPEG, PNG, GIF, WebP. Máx 5MB.</p>
           </CardContent>
         </Card>
 
+        {/* MercadoPago */}
         {isAdmin && (
           <Card className="md:col-span-2">
             <CardHeader>
@@ -212,7 +222,7 @@ export default function SettingsPage() {
                 MercadoPago
               </CardTitle>
               <CardDescription>
-                Conectá tu cuenta de MercadoPago para cobrar con débito, crédito y QR
+                Conectá tu cuenta para que los vendedores puedan cobrar con débito, crédito y QR
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -223,9 +233,7 @@ export default function SettingsPage() {
                     <div>
                       <p className="font-medium text-sm">Cuenta conectada</p>
                       {mpStatus.mpUserId && (
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          ID de cuenta: {mpStatus.mpUserId}
-                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5">ID de cuenta: {mpStatus.mpUserId}</p>
                       )}
                       {mpStatus.connectedAt && (
                         <p className="text-xs text-muted-foreground">
@@ -234,35 +242,76 @@ export default function SettingsPage() {
                       )}
                     </div>
                   </div>
-                  <Button
-                    variant="outline"
-                    onClick={() => setDisconnectDialogOpen(true)}
-                    data-testid="button-disconnect-mp"
-                  >
+                  <Button variant="outline" onClick={() => setDisconnectDialogOpen(true)} data-testid="button-disconnect-mp">
                     <Unlink className="h-4 w-4 mr-2" />
                     Desconectar
                   </Button>
                 </div>
               ) : (
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                  <div className="flex items-start gap-3">
-                    <AlertCircle className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
-                    <div>
-                      <p className="font-medium text-sm">No conectado</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        Conectá tu cuenta para habilitar pagos con débito, crédito y QR
+                <Form {...mpForm}>
+                  <form onSubmit={mpForm.handleSubmit((d) => connectMPMutation.mutate(d))} className="space-y-4 max-w-lg">
+                    <div className="flex items-start gap-3 mb-2">
+                      <AlertCircle className="h-5 w-5 text-muted-foreground mt-0.5 shrink-0" />
+                      <p className="text-sm text-muted-foreground">
+                        Pegá el <strong>Access Token de producción</strong> de tu cuenta de MercadoPago. Lo encontrás en developers.mercadopago.com → tu app → Credenciales de producción.
                       </p>
                     </div>
-                  </div>
-                  <Button
-                    onClick={() => connectMPMutation.mutate()}
-                    disabled={connectMPMutation.isPending}
-                    data-testid="button-connect-mp"
-                  >
-                    <LinkIcon className="h-4 w-4 mr-2" />
-                    {connectMPMutation.isPending ? "Redirigiendo..." : "Conectar MercadoPago"}
-                  </Button>
-                </div>
+
+                    <FormField
+                      control={mpForm.control}
+                      name="accessToken"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Access Token de producción</FormLabel>
+                          <FormControl>
+                            <div className="relative">
+                              <Input
+                                {...field}
+                                type={showToken ? "text" : "password"}
+                                placeholder="APP_USR-..."
+                                className="pr-10"
+                                data-testid="input-mp-access-token"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setShowToken(!showToken)}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                              >
+                                {showToken ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                              </button>
+                            </div>
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={mpForm.control}
+                      name="publicKey"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>
+                            Public Key <span className="text-muted-foreground font-normal">(opcional)</span>
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              {...field}
+                              placeholder="APP_USR-..."
+                              data-testid="input-mp-public-key"
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <Button type="submit" disabled={connectMPMutation.isPending} data-testid="button-connect-mp">
+                      <SiMercadopago className="h-4 w-4 mr-2" />
+                      {connectMPMutation.isPending ? "Verificando..." : "Conectar MercadoPago"}
+                    </Button>
+                  </form>
+                </Form>
               )}
             </CardContent>
           </Card>
@@ -278,9 +327,7 @@ export default function SettingsPage() {
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDisconnectDialogOpen(false)}>
-              Cancelar
-            </Button>
+            <Button variant="outline" onClick={() => setDisconnectDialogOpen(false)}>Cancelar</Button>
             <Button
               variant="destructive"
               onClick={() => disconnectMPMutation.mutate()}

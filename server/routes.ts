@@ -2307,7 +2307,42 @@ precioSugerido es un número. No incluyas el símbolo $. Si no encontrás datos 
 
   // ─── MercadoPago Connect OAuth ────────────────────────────────────────────
 
-  // GET /api/mercadopago/connect  — returns the MP authorization URL
+  // POST /api/mercadopago/connect-manual  — connect MP with a direct access token
+  app.post("/api/mercadopago/connect-manual", requireAuth, async (req: Request, res: Response) => {
+    try {
+      const role = req.session.userRole;
+      if (role !== "admin" && role !== "sistemas") {
+        return res.status(403).json({ message: "Solo administradores pueden conectar MercadoPago" });
+      }
+      const businessId = req.session.businessId;
+      if (!businessId) return res.status(400).json({ message: "Sin negocio asociado" });
+      const { accessToken, publicKey } = req.body;
+      if (!accessToken || typeof accessToken !== "string" || !accessToken.trim()) {
+        return res.status(400).json({ message: "El Access Token es requerido" });
+      }
+      // Validate token by calling MP users/me
+      const testRes = await fetch("https://api.mercadopago.com/users/me", {
+        headers: { Authorization: `Bearer ${accessToken.trim()}` },
+      });
+      if (!testRes.ok) {
+        return res.status(400).json({ message: "Access Token inválido. Verificá que sea el token de producción correcto." });
+      }
+      const userData = await testRes.json() as any;
+      await db.update(businessesTable).set({
+        mpAccessToken: accessToken.trim(),
+        mpRefreshToken: null,
+        mpUserId: String(userData.id ?? ""),
+        mpPublicKey: publicKey?.trim() ?? null,
+        mpConnectedAt: new Date(),
+        mpExpiresAt: null,
+      }).where(eq(businessesTable.id, businessId));
+      res.json({ success: true, mpUserId: String(userData.id ?? "") });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // GET /api/mercadopago/connect  — returns the MP authorization URL (OAuth flow, requires Marketplace app)
   app.get("/api/mercadopago/connect", requireAuth, async (req: Request, res: Response) => {
     try {
       const role = req.session.userRole;
