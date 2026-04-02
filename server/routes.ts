@@ -1,11 +1,13 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertSaleSchema, updateSaleSchema, updateCompanySettingsSchema, insertBranchSchema, updateBranchSchema, insertBranchStockSchema, updateUserBranchesSchema, insertInvitationSchema, updatePlanSchema, insertFeatureSchema, registerBusinessSchema } from "@shared/schema";
+import { insertProductSchema, insertSaleSchema, updateSaleSchema, updateCompanySettingsSchema, insertBranchSchema, updateBranchSchema, insertBranchStockSchema, updateUserBranchesSchema, insertInvitationSchema, updatePlanSchema, insertFeatureSchema, registerBusinessSchema, features as featuresFlagsTable, planFeatures as planFeaturesTable } from "@shared/schema";
 import { fromError } from "zod-validation-error";
 import { registerAuthRoutes, requireAuth, requireAdmin, hashPassword } from "./auth";
 import { generateSlug } from "./utils";
-import { requireFeatureMiddleware, getBusinessFeatures, checkFeatureLimit, invalidateFeatureCache, requireActiveSubscription } from "./features";
+import { requireFeatureMiddleware, getBusinessFeatures, checkFeatureLimit, invalidateFeatureCache, requireActiveSubscription, isFeatureEnabledForBusiness } from "./features";
+import { db } from "./db";
+import { eq } from "drizzle-orm";
 import { z } from "zod";
 import multer from "multer";
 import path from "path";
@@ -125,9 +127,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/product-lookup/image", requireAdmin, async (req: Request, res: Response) => {
     try {
-      const apiKey = process.env.ANTHROPIC_API_KEY;
+      const apiKey = process.env.GEMINI_API_KEY;
       if (!apiKey) {
-        return res.status(503).json({ message: "El reconocimiento por imagen no está configurado. Falta la API key de Anthropic." });
+        return res.status(503).json({ message: "El reconocimiento por imagen no está configurado. Falta la API key de Gemini." });
       }
 
       const { imageBase64, mimeType } = req.body;
@@ -140,85 +142,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(400).json({ message: "Formato de imagen no soportado. Usa JPEG, PNG o WebP." });
       }
 
-      const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 30000);
-
-      try {
-        const response = await fetch("https://api.anthropic.com/v1/messages", {
-          method: "POST",
-          signal: controller.signal,
-          headers: {
-            "Content-Type": "application/json",
-            "x-api-key": apiKey,
-            "anthropic-version": "2023-06-01",
-          },
-          body: JSON.stringify({
-            model: "claude-sonnet-4-20250514",
-            max_tokens: 300,
-            messages: [{
-              role: "user",
-              content: [
-                {
-                  type: "image",
-                  source: {
-                    type: "base64",
-                    media_type: mimeType,
-                    data: imageBase64,
-                  },
-                },
-                {
-                  type: "text",
-                  text: `Analizá esta imagen de un producto de comercio minorista. 
-Respondé ÚNICAMENTE con un JSON sin markdown, con esta estructura:
-{
-  "title": "nombre comercial del producto",
-  "description": "descripción breve del producto (tipo, sabor, variante, etc.)",
-  "brand": "marca del producto",
-  "confidence": "high" | "medium" | "low"
-}
-Si no podés identificar el producto con certeza, ponés confidence: "low" e igualmente completás lo que puedas.`,
-                },
-              ],
-            }],
-          }),
-        });
-        clearTimeout(timeout);
-
-        if (!response.ok) {
-          const errBody = await response.text();
-          console.error("Anthropic API error:", response.status, errBody);
-          return res.status(502).json({ message: "Error al comunicarse con el servicio de IA" });
-        }
-
-        const result = await response.json();
-        const textContent = result.content?.find((c: any) => c.type === "text")?.text || "";
-
-        let parsed: any;
-        try {
-          parsed = JSON.parse(textContent.trim());
-        } catch {
-          const jsonMatch = textContent.match(/\{[\s\S]*\}/);
-          if (jsonMatch) {
-            parsed = JSON.parse(jsonMatch[0]);
-          } else {
-            return res.status(502).json({ message: "No se pudo interpretar la respuesta de la IA" });
-          }
-        }
-
-        res.json({
-          title: parsed.title || "",
-          description: parsed.description || "",
-          brand: parsed.brand || "",
-          confidence: parsed.confidence || "low",
-          source: "ai-vision",
-        });
-      } catch (err: any) {
-        clearTimeout(timeout);
-        if (err.name === "AbortError") {
-          return res.status(503).json({ message: "El análisis de imagen tardó demasiado. Intenta de nuevo." });
-        }
-        return res.status(503).json({ message: "Error al analizar la imagen" });
+      // Check feature flags
+      const businessId = req.session.businessId;
+      const canUseImageRecognition = req.session.userRole === "sistemas" || !businessId ||
+        (await isFeatureEnabledForBusiness("ai_image_recognition", businessId));
+      if (!canUseImageRecognition) {
+        return res.status(403).json({ message: "El reconocimiento de imagen no está disponible en tu plan.", code: "FEATURE_NOT_IN_PLAN" });
       }
+
+      const { GoogleGenerativeAI } = await import("@google/generative-ai");
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+      let parsed: any;
+      try {
+        const imageResult = await model.generateContent([
+          {
+            inlineData: {
+              mimeType: mimeType as any,
+              data: imageBase64,
+            },
+          },
+          {
+            text: `Analizá esta imagen de un producto de comercio minorista argentino. Respondé ÚNICAMENTE con un JSON sin markdown con este formato exacto:
+{"title":"nombre comercial del producto","description":"descripción breve (tipo, sabor, variante, etc.)","brand":"marca del producto","unitType":"unidad","confidence":"high"}
+unitType debe ser "unidad", "gramos" o "litros" según corresponda. confidence debe ser "high", "medium" o "low".`,
+          },
+        ]);
+        const text = imageResult.response.text().trim();
+        const jsonMatch = text.match(/\{[\s\S]*\}/);
+        parsed = JSON.parse(jsonMatch ? jsonMatch[0] : text);
+      } catch (err: any) {
+        console.error("Gemini image error:", err.message);
+        return res.status(502).json({ message: "Error al analizar la imagen con IA" });
+      }
+
+      // Price suggestion (only if feature enabled)
+      const canUsePriceSuggestion = req.session.userRole === "sistemas" || !businessId ||
+        (await isFeatureEnabledForBusiness("ai_price_suggestion", businessId));
+
+      let priceSuggestion: { suggested: number; range: string; source: string } | null = null;
+
+      if (canUsePriceSuggestion && parsed.title) {
+        try {
+          const searchModel = genAI.getGenerativeModel({
+            model: "gemini-1.5-flash",
+            tools: [{ googleSearch: {} } as any],
+          });
+          const searchResult = await searchModel.generateContent(
+            `Buscá el precio de venta al público en Argentina de: "${parsed.title}". Respondé ÚNICAMENTE con un JSON sin markdown:
+{"precioSugerido":1500,"rango":"entre $1200 y $1800","fuente":"descripción breve de la fuente"}
+precioSugerido es un número. No incluyas el símbolo $. Si no encontrás datos concretos, estimá razonablemente.`
+          );
+          const searchText = searchResult.response.text().trim();
+          const searchMatch = searchText.match(/\{[\s\S]*\}/);
+          if (searchMatch) {
+            const sp = JSON.parse(searchMatch[0]);
+            priceSuggestion = {
+              suggested: Number(sp.precioSugerido) || 0,
+              range: sp.rango || "",
+              source: sp.fuente || "",
+            };
+          }
+        } catch (err: any) {
+          console.error("Gemini price search error:", err.message);
+          // non-fatal — price suggestion is optional
+        }
+      }
+
+      res.json({
+        title: parsed.title || "",
+        description: parsed.description || "",
+        brand: parsed.brand || "",
+        unitType: parsed.unitType || "unidad",
+        confidence: parsed.confidence || "low",
+        source: "ai-vision",
+        priceSuggestion,
+      });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }
@@ -2141,6 +2141,58 @@ Si no podés identificar el producto con certeza, ponés confidence: "low" e igu
     try {
       const events = await storage.getSubscriptionEvents(req.params.id);
       res.json(events);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  // ===== SUPERADMIN FEATURE FLAGS =====
+  app.get("/api/admin/feature-flags", requireSistemas, async (req: Request, res: Response) => {
+    try {
+      const allFeaturesList = await db.select().from(featuresFlagsTable);
+      const allPlansList = await storage.getPlans(true);
+      const allPlanFeaturesList = await storage.getAllPlanFeatures();
+      res.json({ features: allFeaturesList, plans: allPlansList, planFeatures: allPlanFeaturesList });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/admin/feature-flags/:key/global", requireSistemas, async (req: Request, res: Response) => {
+    try {
+      const { enabledGlobally } = req.body;
+      if (typeof enabledGlobally !== "boolean") {
+        return res.status(400).json({ message: "enabledGlobally debe ser booleano" });
+      }
+      const [updated] = await db
+        .update(featuresFlagsTable)
+        .set({ enabledGlobally })
+        .where(eq(featuresFlagsTable.key, req.params.key))
+        .returning();
+      if (!updated) return res.status(404).json({ message: "Feature no encontrada" });
+      invalidateFeatureCache();
+      res.json(updated);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.patch("/api/admin/feature-flags/:key/plan/:planId", requireSistemas, async (req: Request, res: Response) => {
+    try {
+      const { enabled } = req.body;
+      if (typeof enabled !== "boolean") {
+        return res.status(400).json({ message: "enabled debe ser booleano" });
+      }
+      const { key, planId } = req.params;
+      const found = (await db.select().from(planFeaturesTable)
+        .where(eq(planFeaturesTable.planId, planId))).find(f => f.featureKey === key);
+      if (found) {
+        await db.update(planFeaturesTable).set({ enabled }).where(eq(planFeaturesTable.id, found.id));
+      } else {
+        await db.insert(planFeaturesTable).values({ planId, featureKey: key, enabled, limit: null });
+      }
+      invalidateFeatureCache();
+      res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

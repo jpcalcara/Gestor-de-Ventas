@@ -11,6 +11,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { insertProductSchema, type InsertProduct, type Product, unitTypeEnum } from "@shared/schema";
+import { useFeatures } from "@/hooks/use-features";
 
 const unitTypeLabels: Record<string, string> = {
   unidad: "Unidad (enteros)",
@@ -25,16 +26,25 @@ interface PrefillData {
   barcode?: string;
 }
 
+interface PriceSuggestion {
+  suggested: number;
+  range: string;
+  source: string;
+}
+
 interface ProductFormProps {
   product?: Product;
   prefillData?: PrefillData;
+  priceSuggestion?: PriceSuggestion | null;
   onSuccess?: () => void;
 }
 
-export function ProductForm({ product, prefillData, onSuccess }: ProductFormProps) {
+export function ProductForm({ product, prefillData, priceSuggestion: initialPriceSuggestion, onSuccess }: ProductFormProps) {
   const { toast } = useToast();
+  const { hasFeature } = useFeatures();
   const initialImage = product?.imageUrl || prefillData?.imageUrl || null;
   const [imagePreview, setImagePreview] = useState<string | null>(initialImage);
+  const [priceSuggestion] = useState<PriceSuggestion | null>(initialPriceSuggestion ?? null);
 
   const form = useForm<InsertProduct>({
     resolver: zodResolver(insertProductSchema),
@@ -55,18 +65,11 @@ export function ProductForm({ product, prefillData, onSuccess }: ProductFormProp
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      toast({
-        title: "Producto creado",
-        description: "El producto se ha creado exitosamente.",
-      });
+      toast({ title: "Producto creado", description: "El producto se ha creado exitosamente." });
       onSuccess?.();
     },
     onError: (error: any) => {
-      toast({
-        title: "Error al crear producto",
-        description: error.message || "No se pudo completar la operación",
-        variant: "destructive",
-      });
+      toast({ title: "Error al crear producto", description: error.message || "No se pudo completar la operación", variant: "destructive" });
     },
   });
 
@@ -76,18 +79,11 @@ export function ProductForm({ product, prefillData, onSuccess }: ProductFormProp
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["/api/products"] });
-      toast({
-        title: "Producto actualizado",
-        description: "El producto se ha actualizado exitosamente.",
-      });
+      toast({ title: "Producto actualizado", description: "El producto se ha actualizado exitosamente." });
       onSuccess?.();
     },
     onError: (error: any) => {
-      toast({
-        title: "Error al actualizar producto",
-        description: error.message || "No se pudo completar la operación",
-        variant: "destructive",
-      });
+      toast({ title: "Error al actualizar producto", description: error.message || "No se pudo completar la operación", variant: "destructive" });
     },
   });
 
@@ -116,6 +112,9 @@ export function ProductForm({ product, prefillData, onSuccess }: ProductFormProp
     setImagePreview(null);
     form.setValue("imageUrl", "");
   };
+
+  const formatPriceHint = (n: number) =>
+    new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS" }).format(n);
 
   const isPending = createMutation.isPending || updateMutation.isPending;
 
@@ -218,6 +217,13 @@ export function ProductForm({ product, prefillData, onSuccess }: ProductFormProp
                   />
                 </FormControl>
                 <FormMessage />
+                {priceSuggestion && hasFeature("ai_price_suggestion") && priceSuggestion.suggested > 0 && (
+                  <p className="text-xs text-muted-foreground mt-1" data-testid="text-price-suggestion">
+                    Precio sugerido: {formatPriceHint(priceSuggestion.suggested)}
+                    {priceSuggestion.range ? ` (${priceSuggestion.range})` : ""}
+                    {priceSuggestion.source ? ` — ${priceSuggestion.source}` : ""}
+                  </p>
+                )}
               </FormItem>
             )}
           />
@@ -279,12 +285,8 @@ export function ProductForm({ product, prefillData, onSuccess }: ProductFormProp
                     >
                       <div className="flex flex-col items-center justify-center pt-5 pb-6">
                         <Upload className="h-10 w-10 text-muted-foreground mb-2" />
-                        <p className="text-sm text-muted-foreground">
-                          Click para subir imagen
-                        </p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          PNG, JPG o WEBP
-                        </p>
+                        <p className="text-sm text-muted-foreground">Click para subir imagen</p>
+                        <p className="text-xs text-muted-foreground mt-1">PNG, JPG o WEBP</p>
                       </div>
                       <input
                         id="image-upload"

@@ -60,15 +60,17 @@ export async function getBusinessFeatures(businessId: string): Promise<{
   const featMap: Record<string, boolean> = {};
   const limMap: Record<string, number | null> = {};
 
-  // Start with all features as false
+  // Start with all features as false; respect enabledGlobally
   for (const f of allFeatures) {
     featMap[f.key] = false;
     limMap[f.key] = null;
   }
 
-  // Apply plan features
+  // Apply plan features, but gate on enabledGlobally
+  const featureGlobalMap = new Map(allFeatures.map(f => [f.key, (f as any).enabledGlobally !== false]));
   for (const pf of pFeatures) {
-    featMap[pf.featureKey] = pf.enabled;
+    const globallyEnabled = featureGlobalMap.get(pf.featureKey) !== false;
+    featMap[pf.featureKey] = globallyEnabled && pf.enabled;
     if (pf.limit !== null && pf.limit !== undefined) {
       limMap[pf.featureKey] = pf.limit;
     }
@@ -76,6 +78,11 @@ export async function getBusinessFeatures(businessId: string): Promise<{
 
   featureCache.set(businessId, { features: featMap, limits: limMap, cachedAt: Date.now() });
   return { features: featMap, limits: limMap };
+}
+
+export async function isFeatureEnabledForBusiness(featureKey: string, businessId: string): Promise<boolean> {
+  const { features: featMap } = await getBusinessFeatures(businessId);
+  return featMap[featureKey] === true;
 }
 
 export async function checkFeatureLimit(

@@ -12,8 +12,10 @@ export interface ScannedProductData {
   brand?: string;
   imageUrl?: string;
   barcode?: string;
+  unitType?: string;
   source: "openfoodfacts" | "ai-vision" | "manual";
   confidence?: "high" | "medium" | "low";
+  priceSuggestion?: { suggested: number; range: string; source: string } | null;
 }
 
 interface ProductScannerProps {

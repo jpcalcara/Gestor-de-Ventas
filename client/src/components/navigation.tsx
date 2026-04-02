@@ -1,6 +1,6 @@
 import { useRef } from "react";
 import { Link, useLocation } from "wouter";
-import { Package, ShoppingCart, BarChart3, Users, ClipboardList, LogOut, Camera, Settings, Building2, CreditCard, Layers, AlertTriangle, X } from "lucide-react";
+import { Package, ShoppingCart, BarChart3, Users, ClipboardList, LogOut, Camera, Settings, Building2, CreditCard, Layers, AlertTriangle, X, Flag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/lib/auth";
 import { useQuery, useMutation } from "@tanstack/react-query";
@@ -85,6 +85,7 @@ export function Navigation() {
     { path: "/audit", label: "Auditoría", icon: ClipboardList, roles: ["sistemas", "admin"] },
     { path: "/billing", label: "Facturación", icon: CreditCard, roles: ["admin"] },
     { path: "/admin/plans", label: "Planes", icon: Layers, roles: ["sistemas"] },
+    { path: "/admin/feature-flags", label: "Features", icon: Flag, roles: ["sistemas"] },
   ];
 
   const visibleItems = navItems.filter(item => 

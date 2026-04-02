@@ -21,6 +21,7 @@ import PricingPage from "@/pages/pricing";
 import RegisterPage from "@/pages/register";
 import BillingPage from "@/pages/billing";
 import AdminPlansPage from "@/pages/admin-plans";
+import AdminFeatureFlagsPage from "@/pages/admin-feature-flags";
 import NotFound from "@/pages/not-found";
 
 function ProtectedRoute({ component: Component }: { component: React.ComponentType }) {
@@ -122,6 +123,9 @@ function Router() {
       </Route>
       <Route path="/admin/plans">
         <AdminRoute component={AdminPlansPage} />
+      </Route>
+      <Route path="/admin/feature-flags">
+        <AdminRoute component={AdminFeatureFlagsPage} />
       </Route>
       <Route component={NotFound} />
     </Switch>

@@ -30,6 +30,7 @@ export default function ProductsPage() {
     imageUrl?: string;
     barcode?: string;
   } | undefined>(undefined);
+  const [priceSuggestion, setPriceSuggestion] = useState<{ suggested: number; range: string; source: string } | null>(null);
 
   const { data: products, isLoading } = useQuery<Product[]>({
     queryKey: ["/api/products"],
@@ -52,6 +53,7 @@ export default function ProductsPage() {
   const handleAddSuccess = () => {
     setIsAddDialogOpen(false);
     setPrefillData(undefined);
+    setPriceSuggestion(null);
   };
 
   const handleEditSuccess = () => {
@@ -71,6 +73,7 @@ export default function ProductsPage() {
       imageUrl: data.imageUrl,
       barcode: data.barcode,
     });
+    setPriceSuggestion(data.priceSuggestion ?? null);
     setIsAddDialogOpen(true);
   };
 
@@ -115,7 +118,7 @@ export default function ProductsPage() {
                 <DialogHeader>
                   <DialogTitle>Nuevo Producto</DialogTitle>
                 </DialogHeader>
-                <ProductForm prefillData={prefillData} onSuccess={handleAddSuccess} />
+                <ProductForm prefillData={prefillData} priceSuggestion={priceSuggestion} onSuccess={handleAddSuccess} />
               </DialogContent>
             </Dialog>
           </div>
