@@ -281,6 +281,13 @@ precioSugerido es un número. No incluyas el símbolo $. Si no encontrás datos 
         return res.status(400).json({ message: "Ya existe un producto con este nombre en la sucursal" });
       }
 
+      if (result.data.barcode && result.data.barcode.trim() !== "") {
+        const existingBarcode = await storage.getProductByBarcode(result.data.barcode.trim(), branchId);
+        if (existingBarcode) {
+          return res.status(400).json({ message: `El código de barras ${result.data.barcode} ya está asignado al producto "${existingBarcode.title}"` });
+        }
+      }
+
       const product = await storage.createProduct({ ...result.data, branchId });
 
       // Auto-create branch stock record with the product's initial stock
@@ -331,6 +338,16 @@ precioSugerido es un número. No incluyas el símbolo $. Si no encontrás datos 
         const existingProduct = await storage.getProductByTitle(result.data.title, branchId);
         if (existingProduct) {
           return res.status(400).json({ message: "Ya existe otro producto con este nombre en la sucursal" });
+        }
+      }
+
+      if (result.data.barcode && result.data.barcode.trim() !== "") {
+        const trimmedBarcode = result.data.barcode.trim();
+        if (currentProduct.barcode !== trimmedBarcode) {
+          const existingBarcode = await storage.getProductByBarcode(trimmedBarcode, branchId);
+          if (existingBarcode) {
+            return res.status(400).json({ message: `El código de barras ${trimmedBarcode} ya está asignado al producto "${existingBarcode.title}"` });
+          }
         }
       }
 

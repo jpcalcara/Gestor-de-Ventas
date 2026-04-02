@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useLocation } from "wouter";
-import { Plus, Search, Edit, Trash2, PackageX, Package, ScanLine } from "lucide-react";
+import { Plus, Search, Edit, Trash2, PackageX, Package, ScanLine, Barcode } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -36,10 +36,14 @@ export default function ProductsPage() {
     queryKey: ["/api/products"],
   });
 
-  const filteredProducts = products?.filter(product =>
-    product.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    product.description.toLowerCase().includes(searchQuery.toLowerCase())
-  ) || [];
+  const filteredProducts = products?.filter(product => {
+    const q = searchQuery.toLowerCase();
+    return (
+      product.title.toLowerCase().includes(q) ||
+      product.description.toLowerCase().includes(q) ||
+      (product.barcode && product.barcode.toLowerCase().includes(q))
+    );
+  }) || [];
 
   const handleEdit = (product: Product) => {
     setSelectedProduct(product);
@@ -212,6 +216,14 @@ export default function ProductsPage() {
                       >
                         {product.title}
                       </h3>
+                      {product.barcode && (
+                        <div className="flex items-center gap-1 mt-0.5">
+                          <Barcode className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                          <span className="text-xs text-muted-foreground font-mono" data-testid={`text-product-barcode-${product.id}`}>
+                            {product.barcode}
+                          </span>
+                        </div>
+                      )}
                       <div className="flex items-center gap-4 mt-1 flex-wrap">
                         <div>
                           <span className="text-sm text-muted-foreground">Precio: </span>
