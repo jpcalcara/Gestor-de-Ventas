@@ -183,7 +183,7 @@ export const businessAdmins = pgTable("business_admins", {
 
 export const branches = pgTable("branches", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
-  businessId: varchar("business_id").notNull().references(() => businesses.id),
+  businessId: varchar("business_id").notNull().references(() => businesses.id, { onDelete: "cascade" }),
   adminUserId: varchar("admin_user_id").references(() => users.id),
   number: integer("number").notNull(),
   name: text("name").notNull(),
