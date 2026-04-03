@@ -499,7 +499,12 @@ precioSugerido es un número. No incluyas el símbolo $. Si no encontrás datos 
       if (!branchId) {
         return res.status(400).json({ message: "Debe seleccionar una sucursal primero" });
       }
-      const sales = await storage.getSalesByBranch(branchId);
+      const userRole = req.session.userRole;
+      const userId = req.session.userId!;
+      let sales = await storage.getSalesByBranch(branchId);
+      if (userRole === "vendedor") {
+        sales = sales.filter(s => s.userId === userId);
+      }
       res.json(sales);
     } catch (error: any) {
       res.status(500).json({ message: error.message });
@@ -1510,7 +1515,7 @@ precioSugerido es un número. No incluyas el símbolo $. Si no encontrás datos 
       const branchId = req.session.branchId;
       const branchName = req.session.branchName;
       
-      if (!businessId && req.session.userRole && req.session.userRole !== "vendedor") {
+      if (!businessId && req.session.userRole && req.session.userRole !== "vendedor" && req.session.userRole !== "sistemas") {
         const businesses = await storage.getBusinessesForUser(req.session.userId!, req.session.userRole);
         const active = businesses.filter(b => b.isActive);
         if (active.length > 0) {

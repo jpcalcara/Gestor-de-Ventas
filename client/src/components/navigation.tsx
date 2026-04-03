@@ -67,7 +67,7 @@ export function Navigation() {
     }
   };
 
-  const { subscription } = useFeatures();
+  const { subscription, features } = useFeatures();
 
   const showSubscriptionBanner =
     user?.role !== "sistemas" &&
@@ -88,9 +88,13 @@ export function Navigation() {
     { path: "/admin/feature-flags", label: "Features", icon: Flag, roles: ["sistemas"] },
   ];
 
-  const visibleItems = navItems.filter(item => 
-    item.roles.includes(user?.role || "")
-  );
+  const visibleItems = navItems.filter(item => {
+    if (!item.roles.includes(user?.role || "")) return false;
+    if (item.path === "/audit" && user?.role === "admin") {
+      return features?.auditoria === true;
+    }
+    return true;
+  });
 
   const getInitials = () => {
     if (!user) return "U";

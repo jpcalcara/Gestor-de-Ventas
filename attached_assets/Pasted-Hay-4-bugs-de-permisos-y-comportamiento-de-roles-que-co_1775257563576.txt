@@ -1,0 +1,89 @@
+Hay 4 bugs de permisos y comportamiento de roles que corregir. No tocar ninguna otra lógica, estilos ni rutas fuera de lo indicado.
+
+---
+
+## FIX 1 — Vendedor ve ventas de todos, debería ver solo las propias
+
+En `server/routes.ts`, el endpoint `GET /api/sales` devuelve todas las ventas de la sucursal sin distinción. Modificarlo para que si el rol es `vendedor`, filtre solo las ventas cuyo `userId` coincida con `req.session.userId`.
+
+Buscar:
+app.get("/api/sales", requireAuth, async (req: Request, res: Response) => {
+  ...
+  const sales = await storage.getSalesByBranch(branchId);
+  res.json(sales);
+
+Reemplazar la línea de la query por:
+  const userRole = req.session.userRole;
+  const userId = req.session.userId!;
+  let sales = await storage.getSalesByBranch(branchId);
+  if (userRole === "vendedor") {
+    sales = sales.filter(s => s.userId === userId);
+  }
+  res.json(sales);
+
+---
+
+## FIX 2 — Auditoría visible en nav para admin sin chequear feature flag
+
+En `client/src/components/navigation.tsx`, la sección de Auditoría se muestra para `admin` aunque su plan no tenga la feature `auditoria` habilitada.
+
+El componente ya usa el hook `useFeatures()`. Agregar el chequeo de la feature en el array `navItems`:
+
+Buscar la línea:
+{ path: "/audit", label: "Auditoría", icon: ClipboardList, roles: ["sistemas", "admin"] },
+
+Reemplazarla. La lógica de visibilidad debe ser: mostrar si el rol es `sistemas`, O si el rol es `admin` Y la feature `auditoria` está habilitada. Implementar esto filtrando `visibleItems` con una condición adicional, o usando el valor que ya devuelve `useFeatures()` para chequear `features?.auditoria === true` antes de incluir el item.
+
+El hook `useFeatures()` ya está importado y usado en el mismo componente. Usar el valor `features` que devuelve para esta validación. Si `features` es undefined (cargando), no mostrar el item de auditoría para `admin` (comportamiento seguro por defecto).
+
+---
+
+## FIX 3 — `GET /api/session/branch` auto-asigna businessId a sistemas
+
+En `server/routes.ts`, el endpoint `GET /api/session/branch` tiene este bloque que se ejecuta para cualquier rol que no sea `vendedor`, incluyendo `sistemas`:
+
+if (!businessId && req.session.userRole && req.session.userRole !== "vendedor") {
+  const businesses = await storage.getBusinessesForUser(req.session.userId!, req.session.userRole);
+  const active = businesses.filter(b => b.isActive);
+  if (active.length > 0) {
+    businessId = active[0].id;
+    businessName = active[0].razonSocial;
+    req.session.businessId = businessId;
+    req.session.businessName = businessName;
+  }
+}
+
+Esto hace que `sistemas` quede con el `businessId` del primer negocio activo asignado en sesión, lo cual contamina queries posteriores.
+
+Cambiar la condición para excluir también a `sistemas`:
+
+if (!businessId && req.session.userRole && req.session.userRole !== "vendedor" && req.session.userRole !== "sistemas") {
+
+---
+
+## FIX 4 — Vendedor bloqueado al cambiar de negocio sin mensaje explicativo
+
+En `server/routes.ts`, el endpoint `POST /api/session/business` devuelve un 403 para vendedores pero el frontend no muestra ningún mensaje. Este fix es solo de frontend.
+
+En `client/src/components/branch-selector.tsx`, en el componente `BranchSwitcher`, el `handleConfirmSwitch` ya tiene un bloque catch que muestra un toast de error. No hace falta cambiar nada ahí.
+
+El problema es que el `BranchSwitcher` no debería ni mostrar el dropdown de cambio de sucursal para vendedores. Verificar la condición:
+
+const isAdminOrVendedor = user?.role === "admin" || user?.role === "vendedor";
+
+Esta variable se usa para decidir si mostrar el control. Cambiarla para que solo admins y sistemas puedan ver el switcher:
+
+const canSwitchBranch = user?.role === "admin" || user?.role === "sistemas";
+
+Y reemplazar todos los usos de `isAdminOrVendedor` en ese componente por `canSwitchBranch`.
+
+---
+
+## Verificación esperada
+
+1. Vendedor logueado: en `/reports` solo ve sus propias ventas, no las del resto.
+2. Admin en plan Free: no ve el link de Auditoría en la nav.
+3. Admin en plan Starter o Pro: sigue viendo el link de Auditoría normalmente.
+4. Sistemas: entra al sistema sin que se le asigne un businessId automático en sesión.
+5. Vendedor: no ve el dropdown de cambio de sucursal en el header.
+6. Admin y Sistemas: siguen viendo el dropdown de sucursal normalmente.

@@ -146,7 +146,7 @@ export function BranchSwitcher() {
 
   const activeBranches = branches.filter((b) => b.isActive);
   const currentBranch = branches.find((b) => b.id === branchId);
-  const isAdminOrVendedor = user?.role === "admin" || user?.role === "vendedor";
+  const canSwitchBranch = user?.role === "admin" || user?.role === "sistemas";
 
   const handleConfirmSwitch = async () => {
     if (!confirmBranch) return;
@@ -171,7 +171,7 @@ export function BranchSwitcher() {
   };
 
   // Mostrar solo texto si no hay rama seleccionada o si es sistemas sin múltiples sucursales
-  if (!branchId || (!isAdminOrVendedor && activeBranches.length <= 1)) {
+  if (!branchId || (!canSwitchBranch && activeBranches.length <= 1)) {
     return currentBranch ? (
       <div className="flex items-center gap-2 px-2 py-1 text-sm text-muted-foreground" data-testid="text-current-branch">
         <Building2 className="h-4 w-4" />
