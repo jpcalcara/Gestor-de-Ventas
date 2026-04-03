@@ -85,6 +85,10 @@ export function BranchSelectorModal() {
     return null;
   }
 
+  if (user?.role === "sistemas") {
+    return null;
+  }
+
   // Si no hay sucursales, no mostrar ningún modal - el usuario puede usar el sistema
   if (activeBranches.length === 0) {
     return null;

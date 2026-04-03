@@ -40,6 +40,10 @@ export function BusinessBranchSelectorModal() {
     return null;
   }
 
+  if (user?.role === "sistemas") {
+    return null;
+  }
+
   if (activeBranches.length === 0) {
     return null;
   }
