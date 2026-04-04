@@ -1032,6 +1032,15 @@ precioSugerido es un número. No incluyas el símbolo $. Si no encontrás datos 
     }
   });
 
+  app.get("/api/businesses-with-branches", requireSistemas, async (req: Request, res: Response) => {
+    try {
+      const data = await storage.getBusinessesWithBranches();
+      res.json(data);
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   app.post("/api/businesses", requireAdmin, async (req: Request, res: Response) => {
     try {
       if (req.session.userRole !== "sistemas") {

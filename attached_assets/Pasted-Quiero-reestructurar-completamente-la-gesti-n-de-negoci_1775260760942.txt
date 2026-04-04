@@ -1,0 +1,119 @@
+Quiero reestructurar completamente la gestión de negocios y sucursales para el rol `sistemas`. El objetivo es unificar ambas vistas en una sola página con una estructura jerárquica expandible: cada negocio muestra sus sucursales anidadas.
+
+El stack es React 18 + TypeScript + Wouter + TanStack Query v5 + shadcn/ui + Tailwind + Lucide. El backend es Node.js + Express + TypeScript. Los roles son: `sistemas` (superadmin), `admin` (por negocio), `vendedor`.
+
+---
+
+## CAMBIO 1 — Backend: nuevo endpoint de negocios con sucursales anidadas
+
+En `server/routes.ts`, agregar el siguiente endpoint protegido con `requireSistemas`:
+
+GET /api/businesses-with-branches
+  - Devuelve todos los negocios con sus sucursales anidadas
+  - Respuesta:
+    [
+      {
+        id, razonSocial, slug, cuit, encargado, telefono, mail,
+        plan, isActive, createdAt,
+        branches: [
+          { id, number, name, address, isActive }
+        ]
+      }
+    ]
+  - Ordenar negocios por razonSocial ASC
+  - Ordenar sucursales por number ASC dentro de cada negocio
+
+Implementar en `server/storage.ts` el método `getBusinessesWithBranches()` que haga un JOIN de businesses con branches y los agrupe. Si no hay sucursales para un negocio, devolver branches: [].
+
+---
+
+## CAMBIO 2 — Frontend: reemplazar `client/src/pages/businesses.tsx`
+
+Reescribir completamente la página `client/src/pages/businesses.tsx` con la nueva estructura. Esta página es SOLO visible para el rol `sistemas`.
+
+### Layout general
+
+- Header con título "Gestión de negocios", subtítulo con el conteo total (ej: "4 negocios · 6 sucursales activas") y botón "+ Nuevo negocio" a la derecha
+- Fila de 4 metric cards debajo del header: "Total negocios", "Plan Free", "Plan Starter", "Plan Pro" — con los conteos correspondientes calculados del array de datos
+- Lista de negocios expandibles debajo
+
+### Estructura de cada negocio (fila expandible)
+
+Cada negocio es una card con:
+
+**Cabecera (siempre visible, clickeable para expandir/colapsar):**
+- Avatar con las 2 primeras letras de la razonSocial (fondo color basado en plan: Free=gris, Starter=amber, Pro=blue)
+- Nombre del negocio (razonSocial) en bold
+- CUIT y mail como subtítulo en muted
+- Badges: estado (Activo/Inactivo en verde/gris) y plan (Free/Starter/Pro)
+- Conteo de sucursales: "N sucursales" en texto muted
+- Botones de acción: "Editar" (abre dialog de edición del negocio) y "Ver como" (llama a `POST /api/session/business` con el businessId y redirige a `/`)
+- Ícono chevron que rota al expandir
+
+**Cuerpo expandible (sucursales):**
+- Cada sucursal como una fila indentada con:
+  - Dot de color (verde si activa, gris si inactiva)
+  - Nombre: "Sucursal N · {name}"
+  - Dirección en texto muted (o "Inactiva" en texto tertiary si no está activa)
+  - Botones: "Editar" (abre dialog de edición de sucursal) y "Desactivar"/"Activar" según estado
+- Al final de las sucursales, una fila con "+ Agregar sucursal" en color info que abre el dialog de creación de sucursal con el businessId pre-completado
+
+### Estado de expansión
+
+- Por defecto todos colapsados
+- Usar `useState` con un `Set<string>` de IDs expandidos
+- Toggle al hacer click en la cabecera
+
+### Dialogs necesarios (reutilizar los ya existentes o crear nuevos):
+
+1. **Dialog de negocio** (crear/editar): campos razonSocial, CUIT, encargado, teléfono, mail, plan (selector Free/Starter/Pro), isActive. Al crear: llamar `POST /api/businesses`. Al editar: llamar `PATCH /api/businesses/:id`.
+
+2. **Dialog de sucursal** (crear/editar): campos number, name, address, isActive. El businessId viene como prop (pre-completado, no editable). Al crear: llamar `POST /api/branches`. Al editar: llamar `PATCH /api/branches/:id`.
+
+### Query de datos
+
+Usar `useQuery` con queryKey `["/api/businesses-with-branches"]` para obtener los datos. Invalidar tanto `["/api/businesses-with-branches"]` como `["/api/businesses"]` y `["/api/branches"]` después de cualquier mutación para mantener consistencia con otras partes del sistema.
+
+---
+
+## CAMBIO 3 — Nav: eliminar el ítem "Sucursales" para `sistemas`
+
+En `client/src/components/navigation.tsx`, el array `navItems` tiene actualmente:
+
+{ path: "/businesses", label: "Negocio", icon: Building2, roles: ["sistemas", "admin"] },
+{ path: "/branches", label: "Sucursales", icon: Building2, roles: ["sistemas", "admin"] },
+
+Cambiar a:
+
+{ path: "/businesses", label: "Negocios", icon: Building2, roles: ["sistemas"] },
+{ path: "/branches", label: "Sucursales", icon: Building2, roles: ["admin"] },
+
+De esta forma:
+- `sistemas` ve "Negocios" (la nueva página unificada) pero NO ve "Sucursales"
+- `admin` ve "Sucursales" (su propia página de sucursales, sin cambios) pero NO ve "Negocios"
+- No tocar la página `client/src/pages/branches.tsx` ni su lógica — sigue funcionando igual para el rol `admin`
+
+---
+
+## CAMBIO 4 — Ruta en App.tsx
+
+En `client/src/App.tsx`, verificar que la ruta `/businesses` ya existe y apunta a `BusinessesPage`. No agregar rutas nuevas. La página `/branches` sigue existiendo para el rol `admin`.
+
+---
+
+## Restricciones
+
+- No modificar `client/src/pages/branches.tsx` — esa página la sigue usando el admin
+- No modificar ningún endpoint existente de `/api/businesses` ni `/api/branches` — solo agregar el nuevo `/api/businesses-with-branches`
+- No tocar el sistema de roles, auth, ni sesiones
+- Mantener el diseño visual del proyecto: shadcn/ui, Tailwind, Inter font, mismos tokens de color y espaciado
+- El botón "Ver como" solo debe aparecer para `sistemas` y debe funcionar: llama a `POST /api/session/business` con el id del negocio, y si tiene éxito redirige a `/` usando `useLocation` de Wouter
+
+## Verificación esperada
+
+1. `sistemas` entra a `/businesses` y ve la lista de negocios con sus sucursales anidadas expandibles
+2. Puede crear/editar negocios y sucursales desde dialogs sin salir de la página
+3. Puede hacer click en "Ver como" en un negocio y el sistema lo lleva a `/` operando en el contexto de ese negocio
+4. El ítem "Sucursales" desaparece del nav para `sistemas`
+5. El `admin` sigue viendo "Sucursales" en su nav y su página `/branches` funciona igual que antes
+6. Los conteos en las metric cards son correctos y se actualizan al agregar/eliminar negocios o sucursales

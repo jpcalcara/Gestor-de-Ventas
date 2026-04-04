@@ -605,6 +605,28 @@ export class DatabaseStorage implements IStorage {
     return result.rowCount !== null && result.rowCount > 0;
   }
 
+  async getBusinessesWithBranches(): Promise<Array<{
+    id: string; razonSocial: string; slug: string | null; cuit: string | null;
+    encargado: string | null; telefono: string | null; mail: string | null;
+    plan: string; isActive: boolean; createdAt: Date;
+    branches: Array<{ id: string; number: number; name: string; address: string; isActive: boolean }>;
+  }>> {
+    const bizList = await db.select().from(businesses).orderBy(businesses.razonSocial);
+    const branchList = await db.select({
+      id: branches.id, businessId: branches.businessId, number: branches.number,
+      name: branches.name, address: branches.address, isActive: branches.isActive,
+    }).from(branches).orderBy(branches.number);
+
+    return bizList.map(b => ({
+      id: b.id, razonSocial: b.razonSocial, slug: b.slug ?? null, cuit: b.cuit ?? null,
+      encargado: b.encargado ?? null, telefono: b.telefono ?? null, mail: b.mail ?? null,
+      plan: b.plan ?? "free", isActive: b.isActive, createdAt: b.createdAt,
+      branches: branchList
+        .filter(br => br.businessId === b.id)
+        .map(br => ({ id: br.id, number: br.number, name: br.name, address: br.address, isActive: br.isActive })),
+    }));
+  }
+
   async getBusinessAdmins(businessId: string): Promise<BusinessAdmin[]> {
     return await db.select().from(businessAdmins).where(eq(businessAdmins.businessId, businessId));
   }
