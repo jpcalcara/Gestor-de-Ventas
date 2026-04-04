@@ -1,0 +1,391 @@
+# Prompt para Replit Agent — Cambio de plan con prorrateo + límite multisucursal
+
+## Contexto del proyecto
+
+SaaS multi-tenant de gestión de ventas. Stack: Node.js + Express + TypeScript (ESM) + Drizzle ORM + PostgreSQL (Neon) + React 18 + TanStack Query v5 + shadcn/ui + Tailwind + Wouter. Roles: `sistemas` (superadmin), `admin` (por negocio), `vendedor`.
+
+Las siguientes tablas y columnas ya existen en el schema:
+- `businesses`: tiene `planId`, `mpSubscriptionId`, `subscriptionStatus`, `lastPaymentAt`, `nextPaymentAt`, `gracePeriodDays`, `plan`
+- `plans`: tiene `id`, `slug`, `name`, `price`, `isActive`
+- `plan_features`: tiene `planId`, `featureKey`, `enabled`, `limit`
+- `subscription_events`: tiene `businessId`, `type`, `description`, `amount`, `metadata`
+- El SDK de Mercado Pago ya está instalado e inicializado en `server/mercadopago.ts`
+- El helper `checkFeatureLimit(businessId, featureKey, currentCount)` ya existe en `server/features.ts`
+- El helper `invalidateFeatureCache(businessId)` ya existe en `server/features.ts`
+
+---
+
+## REGLAS DE NEGOCIO
+
+**Ciclo de facturación:** 30 días corridos desde `lastPaymentAt`. No mes calendario.
+
+**Upgrade (plan más caro):**
+- Cobrar diferencial prorrateado de inmediato via Mercado Pago (pago único, no suscripción).
+- Fórmula: `total = Math.round(((precioNuevo - precioActual) / 30) * diasRestantes)`
+- `diasRestantes = Math.max(0, 30 - Math.floor((Date.now() - lastPaymentAt) / 86400000))`
+- El plan se activa inmediatamente al confirmar el pago (webhook MP).
+- Al próximo ciclo MP ya cobra el precio nuevo completo.
+
+**Downgrade (plan más barato) o cambio a Free:**
+- NO se aplica de inmediato. NO se devuelve dinero.
+- Se guarda `pendingPlanId` en el negocio.
+- Se aplica automáticamente cuando MP procesa la próxima renovación (webhook pago aprobado).
+- El cliente sigue con las features del plan actual hasta que vence el ciclo.
+- Si el destino es Free: cancelar suscripción en MP además de guardar `pendingPlanId`.
+
+**Sistemas cambia plan manualmente:** cambio directo sin cobro ni prorrateo.
+
+---
+
+## PARTE 1 — Schema: agregar `pendingPlanId` a `businesses`
+
+En `shared/schema.ts`, agregar a la tabla `businesses` la siguiente columna:
+
+```typescript
+pendingPlanId: varchar("pending_plan_id").references(() => plans.id),
+```
+
+Ejecutar `npm run db:push` después.
+
+---
+
+## PARTE 2 — Backend: endpoint preview de cambio de plan
+
+En `server/routes.ts`, agregar dentro de `registerRoutes`:
+
+```
+GET /api/subscription/change-plan/preview
+  - requireAuth, solo rol admin
+  - Query param: ?planSlug=pro
+  - Lógica:
+    1. Obtener negocio del admin (req.session.businessId)
+    2. Obtener plan actual del negocio (JOIN con plans por planId)
+    3. Obtener plan destino por planSlug
+    4. Si no existe el plan destino → 404
+    5. Calcular diasTranscurridos = Math.floor((Date.now() - lastPaymentAt.getTime()) / 86400000)
+    6. diasRestantes = Math.max(0, 30 - diasTranscurridos)
+    7. diferencial = Math.round(((precioNuevo - precioActual) / 30) * diasRestantes)
+    8. tipo = precioNuevo > precioActual ? "upgrade" : precioNuevo < precioActual ? "downgrade" : "same"
+  - Respuesta:
+    {
+      currentPlan: { name, price, slug },
+      targetPlan: { name, price, slug },
+      diasTranscurridos,
+      diasRestantes,
+      diferencial,
+      tipo: "upgrade" | "downgrade" | "same",
+      efectivaEn: null | nextPaymentAt.toISOString()
+    }
+```
+
+---
+
+## PARTE 3 — Backend: endpoint de cambio de plan
+
+En `server/routes.ts`, agregar:
+
+```
+POST /api/subscription/change-plan
+  - requireAuth, solo rol admin
+  - Body: { planSlug: string }
+  - Lógica:
+
+    1. Obtener negocio del admin (req.session.businessId)
+    2. Obtener plan actual del negocio
+    3. Obtener plan destino por planSlug — si no existe devolver 400
+    4. Si planSlug === plan actual → devolver 400 "Ya estás en este plan"
+
+    5. Calcular diasRestantes igual que en el preview
+
+    6. diferencial = Math.round(((precioNuevo - precioActual) / 30) * diasRestantes)
+
+    === CASO UPGRADE (diferencial > 0) ===
+    7a. Crear un pago único en Mercado Pago por el monto diferencial usando la Payment API:
+        POST https://api.mercadopago.com/v1/payments
+        Headers: Authorization: Bearer {MP_ACCESS_TOKEN}
+        Body:
+        {
+          transaction_amount: diferencial,
+          description: `Upgrade de ${planActual.name} a ${planDestino.name} - ${diasRestantes} días restantes`,
+          payment_method_id: "account_money",
+          payer: { email: req.session.userEmail },
+          external_reference: `upgrade_${businessId}_${planDestino.slug}`,
+          metadata: { businessId, fromPlan: planActual.slug, toPlan: planDestino.slug, type: "plan_upgrade" }
+        }
+    7b. Si MP devuelve init_point o payment_url → devolver { type: "upgrade", checkoutUrl, diferencial, diasRestantes }
+    7c. Si MP devuelve status "approved" directamente (pago con saldo MP) → aplicar el upgrade inmediatamente:
+        - updateBusiness(businessId, { planId: planDestino.id, plan: planDestino.slug, pendingPlanId: null })
+        - createSubscriptionEvent({ businessId, type: "plan_upgrade_applied", description: `...`, amount: diferencial })
+        - invalidateFeatureCache(businessId)
+        - devolver { type: "upgrade_immediate", message: "Plan actualizado exitosamente" }
+
+    === CASO DOWNGRADE O FREE (diferencial <= 0) ===
+    8a. Si el destino es Free (precio === 0) Y hay mpSubscriptionId:
+        - Cancelar la suscripción en MP usando cancelMPSubscription del archivo mp-subscriptions.ts
+    8b. Guardar pendingPlanId = planDestino.id en el negocio
+    8c. createSubscriptionEvent({
+          businessId,
+          type: "plan_downgrade_scheduled",
+          description: `Cambio programado de ${planActual.name} a ${planDestino.name}`,
+          metadata: JSON.stringify({ fromPlan: planActual.slug, toPlan: planDestino.slug, effectiveDate: nextPaymentAt })
+        })
+    8d. devolver {
+          type: "downgrade",
+          message: `El cambio se aplicará el ${nextPaymentAt.toLocaleDateString('es-AR')}`,
+          effectiveDate: nextPaymentAt
+        }
+```
+
+---
+
+## PARTE 4 — Backend: cancelar downgrade pendiente
+
+En `server/routes.ts`, agregar:
+
+```
+DELETE /api/subscription/change-plan/pending
+  - requireAuth, solo rol admin
+  - Lógica:
+    1. Obtener negocio del admin
+    2. Si no hay pendingPlanId → devolver 400 "No hay cambio pendiente"
+    3. updateBusiness(businessId, { pendingPlanId: null })
+    4. createSubscriptionEvent({ type: "plan_downgrade_cancelled", description: "Cambio de plan pendiente cancelado por el usuario" })
+    5. devolver { success: true }
+```
+
+---
+
+## PARTE 5 — Backend: endpoint de cambio manual para sistemas
+
+En `server/routes.ts`, agregar:
+
+```
+PATCH /api/admin/businesses/:id/plan
+  - requireSistemas
+  - Body: { planSlug: string }
+  - Lógica:
+    1. Buscar el plan por slug — si no existe devolver 404
+    2. Obtener el negocio por params.id — si no existe devolver 404
+    3. updateBusiness(params.id, { planId: plan.id, plan: plan.slug, pendingPlanId: null })
+    4. createSubscriptionEvent({
+         businessId: params.id,
+         type: "plan_changed_by_admin",
+         description: `Plan cambiado manualmente de ${negocio.plan} a ${plan.slug}`,
+         metadata: JSON.stringify({ changedBy: req.session.userId })
+       })
+    5. invalidateFeatureCache(params.id)
+    6. devolver { success: true, plan }
+```
+
+---
+
+## PARTE 6 — Backend: aplicar downgrade pendiente en webhook
+
+En `server/mp-webhooks.ts`, dentro del bloque `if (status === "approved")`, DESPUÉS de actualizar `subscriptionStatus`, `lastPaymentAt` y `nextPaymentAt`, agregar:
+
+```typescript
+// Aplicar downgrade pendiente si existe
+if (business.pendingPlanId) {
+  const [pendingPlan] = await db.select().from(plans).where(eq(plans.id, business.pendingPlanId));
+  if (pendingPlan) {
+    await storage.updateBusiness(business.id, {
+      planId: business.pendingPlanId,
+      plan: pendingPlan.slug,
+      pendingPlanId: null,
+    } as any);
+    await storage.createSubscriptionEvent({
+      businessId: business.id,
+      type: "plan_downgrade_applied",
+      description: `Plan cambiado a ${pendingPlan.name} al inicio del nuevo ciclo`,
+    } as any);
+    invalidateFeatureCache(business.id);
+  }
+}
+```
+
+Asegurarse de importar `plans` de `@shared/schema` y `invalidateFeatureCache` de `./features` en ese archivo si no están importados.
+
+---
+
+## PARTE 7 — Backend: límite de multisucursal al crear sucursal
+
+En `server/routes.ts`, en el endpoint `POST /api/branches`, ANTES de crear la sucursal, agregar la verificación del límite del plan para el rol `admin`:
+
+```typescript
+// Solo verificar límite para admins (sistemas no tiene límite)
+if (userRole === "admin" && businessId) {
+  // Contar sucursales activas del negocio
+  const existingBranches = await storage.getBranchesByBusiness(businessId);
+  const activeBranchCount = existingBranches.filter(b => b.isActive).length;
+
+  // Verificar límite del plan
+  const { allowed, limit } = await checkFeatureLimit(businessId, "multisucursal", activeBranchCount);
+  if (!allowed) {
+    return res.status(403).json({
+      message: `Tu plan actual permite hasta ${limit} sucursal${limit === 1 ? '' : 'es'} activa${limit === 1 ? '' : 's'}. Actualizá tu plan para agregar más.`,
+      code: "FEATURE_LIMIT_REACHED",
+      feature: "multisucursal",
+      limit,
+      current: activeBranchCount,
+    });
+  }
+}
+```
+
+Si el método `getBranchesByBusiness(businessId)` no existe en `server/storage.ts`, crearlo:
+
+```typescript
+async getBranchesByBusiness(businessId: string): Promise<Branch[]> {
+  return await db.select().from(branches).where(eq(branches.businessId, businessId));
+}
+```
+
+---
+
+## PARTE 8 — Frontend: UI de cambio de plan en `/billing`
+
+En `client/src/pages/billing.tsx`, agregar una sección "Tu plan" con la lógica de cambio de plan.
+
+### 8.1 Query de preview
+
+Usar `useQuery` con `enabled: !!selectedPlanSlug && selectedPlanSlug !== currentPlanSlug`:
+```typescript
+const { data: preview } = useQuery({
+  queryKey: ["/api/subscription/change-plan/preview", selectedPlanSlug],
+  queryFn: () => fetch(`/api/subscription/change-plan/preview?planSlug=${selectedPlanSlug}`).then(r => r.json()),
+  enabled: !!selectedPlanSlug && selectedPlanSlug !== currentPlanSlug,
+});
+```
+
+### 8.2 Cards de planes
+
+Mostrar las 3 cards (Free, Starter, Pro) con los datos de `GET /api/plans`. Para cada una:
+- Si es el plan actual: badge verde "Plan actual", card resaltada con borde azul
+- Si es upgrade respecto al actual: badge verde "Upgrade · pagar $X ahora" (mostrar el diferencial del preview)
+- Si es downgrade: badge amber "Downgrade · efectivo el {fecha}"
+- Si es Free y tienen suscripción activa: badge gris "Cancelar suscripción · efectivo el {fecha}"
+
+Si hay `pendingPlanId` activo, mostrar banner amarillo debajo de las cards:
+"Tenés un cambio programado a {pendingPlan} para el {fecha}." con botón "Cancelar cambio" que llama a `DELETE /api/subscription/change-plan/pending`.
+
+### 8.3 AlertDialog de confirmación
+
+Al hacer click en un plan diferente al actual, abrir `AlertDialog` con:
+
+**Para upgrade:**
+> "Se cobrará $X ahora por los N días restantes del ciclo. A partir del próximo ciclo pagarás $Y/mes completo."
+
+**Para downgrade:**
+> "Seguirás en tu plan actual hasta el {fecha}. A partir de ahí pasarás a {plan} por $Y/mes."
+
+**Para Free:**
+> "Tu suscripción se cancelará al final del ciclo actual ({fecha}). Después pasarás al plan gratuito con funcionalidades limitadas."
+
+Botones: "Cancelar" y "Confirmar cambio".
+
+### 8.4 Mutation de cambio de plan
+
+```typescript
+const changePlanMutation = useMutation({
+  mutationFn: async (planSlug: string) => {
+    const res = await apiRequest("POST", "/api/subscription/change-plan", { planSlug });
+    return res;
+  },
+  onSuccess: (data) => {
+    if (data.checkoutUrl) {
+      window.location.href = data.checkoutUrl;
+    } else {
+      toast({ title: "Listo", description: data.message });
+      queryClient.invalidateQueries({ queryKey: ["/api/my-features"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/subscription/info"] });
+    }
+  },
+  onError: (error: any) => {
+    toast({ title: "Error", description: error.message, variant: "destructive" });
+  },
+});
+```
+
+Invalidar siempre `["/api/my-features"]` después de cualquier cambio exitoso.
+
+---
+
+## PARTE 9 — Frontend: límite de multisucursal en `branches.tsx`
+
+En `client/src/pages/branches.tsx`, agregar la verificación del límite en el botón de crear sucursal para el rol `admin`:
+
+```typescript
+const { getLimit, hasFeature } = useFeatures();
+const branchLimit = getLimit("multisucursal");
+const activeBranchCount = branches.filter(b => b.isActive).length;
+const atLimit = user?.role === "admin" && branchLimit !== null && activeBranchCount >= branchLimit;
+```
+
+Modificar el botón "+ Nueva sucursal" para el rol `admin`:
+- Si `atLimit === true`: deshabilitar el botón y mostrar tooltip o texto explicativo: "Límite de tu plan: {branchLimit} sucursal{branchLimit === 1 ? '' : 'es'}. Actualizá tu plan para agregar más."
+- Si no está en el límite: funciona normal.
+
+Debajo del botón (solo para `admin` y cuando esté cerca o en el límite), mostrar un texto muted:
+```tsx
+{user?.role === "admin" && branchLimit !== null && (
+  <p className="text-xs text-muted-foreground">
+    {activeBranchCount} de {branchLimit} sucursal{branchLimit === 1 ? '' : 'es'} activa{branchLimit === 1 ? '' : 's'} en tu plan
+    {atLimit && (
+      <> · <a href="/billing" className="text-primary underline">Mejorar plan</a></>
+    )}
+  </p>
+)}
+```
+
+---
+
+## PARTE 10 — Frontend: cambio de plan manual desde panel sistemas
+
+En `client/src/pages/admin-plans.tsx` o en la sección de negocios donde corresponda, para cada negocio agregar un selector de plan:
+
+```tsx
+<Select
+  value={business.plan}
+  onValueChange={(newPlan) => {
+    if (newPlan !== business.plan) {
+      setPlanChangeTarget({ businessId: business.id, businessName: business.razonSocial, newPlan });
+    }
+  }}
+>
+  <SelectTrigger className="w-32">
+    <SelectValue />
+  </SelectTrigger>
+  <SelectContent>
+    <SelectItem value="free">Free</SelectItem>
+    <SelectItem value="starter">Starter</SelectItem>
+    <SelectItem value="pro">Pro</SelectItem>
+  </SelectContent>
+</Select>
+```
+
+Cuando se selecciona un plan diferente, abrir `AlertDialog`:
+> "¿Cambiar el plan de {negocio} a {plan}? Este cambio es inmediato y no genera cobro al cliente."
+
+Al confirmar, llamar a `PATCH /api/admin/businesses/:id/plan` con `{ planSlug }` e invalidar `["/api/businesses"]` y `["/api/businesses-with-branches"]`.
+
+---
+
+## Restricciones
+
+- No modificar lógica de roles, sesiones ni middlewares existentes.
+- No tocar otros bloques del webhook fuera del indicado en PARTE 6.
+- El rol `sistemas` nunca es limitado por planes ni features.
+- Usar componentes shadcn/ui ya presentes: `AlertDialog`, `Badge`, `Card`, `Select`, `Tooltip`, `useToast`.
+- Mantener el diseño visual actual: Tailwind, tokens de color existentes, Inter font.
+- Después de cualquier cambio de plan, siempre invalidar `["/api/my-features"]` para que las features se refresquen inmediatamente en toda la UI.
+- Si `lastPaymentAt` es null (negocio en trial sin pagos previos), tratar `diasRestantes = 30` para el cálculo del diferencial.
+
+## Verificación esperada
+
+1. Admin en plan Starter puede hacer click en Pro, ver el monto a pagar ($X por N días), confirmar y ser redirigido a MP.
+2. Admin en plan Pro puede seleccionar Starter, ver que el cambio es gratuito y programado, y ver el banner de cambio pendiente.
+3. Al vencer el ciclo (webhook MP pago aprobado), el downgrade pendiente se aplica automáticamente.
+4. Admin en plan Free (con límite 1 sucursal) no puede crear una segunda sucursal — el botón está deshabilitado con mensaje explicativo.
+5. Admin en plan Starter (límite 3) ve "2 de 3 sucursales activas" y puede crear una más, pero no una cuarta.
+6. Sistemas puede cambiar el plan de cualquier negocio desde el panel sin que se genere ningún cobro.
+7. Cancelar un downgrade pendiente limpia el `pendingPlanId` y desaparece el banner.
