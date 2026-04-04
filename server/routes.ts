@@ -1,7 +1,7 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
-import { insertProductSchema, insertSaleSchema, updateSaleSchema, updateCompanySettingsSchema, insertBranchSchema, updateBranchSchema, insertBranchStockSchema, updateUserBranchesSchema, insertInvitationSchema, updatePlanSchema, insertFeatureSchema, registerBusinessSchema, features as featuresFlagsTable, planFeatures as planFeaturesTable, businesses as businessesTable, saleOrders as saleOrdersTable } from "@shared/schema";
+import { insertProductSchema, insertSaleSchema, updateSaleSchema, updateCompanySettingsSchema, insertBranchSchema, updateBranchSchema, insertBranchStockSchema, updateUserBranchesSchema, insertInvitationSchema, updatePlanSchema, insertFeatureSchema, registerBusinessSchema, features as featuresFlagsTable, planFeatures as planFeaturesTable, businesses as businessesTable, saleOrders as saleOrdersTable, plans as plansTable } from "@shared/schema";
 import { fromError } from "zod-validation-error";
 import { registerAuthRoutes, requireAuth, requireAdmin, hashPassword } from "./auth";
 import { generateSlug } from "./utils";
@@ -1297,6 +1297,22 @@ precioSugerido es un número. No incluyas el símbolo $. Si no encontrás datos 
         return res.status(400).json({ message: "El negocio es requerido" });
       }
 
+      // Verificar límite de multisucursal (solo para admins, sistemas no tiene límite)
+      if (userRole === "admin") {
+        const existingBranches = await storage.getBranchesForBusiness(businessId);
+        const activeBranchCount = existingBranches.filter((b: any) => b.isActive).length;
+        const { allowed, limit } = await checkFeatureLimit(businessId, "multisucursal", activeBranchCount);
+        if (!allowed) {
+          return res.status(403).json({
+            message: `Tu plan actual permite hasta ${limit} sucursal${limit === 1 ? "" : "es"} activa${limit === 1 ? "" : "s"}. Actualizá tu plan para agregar más.`,
+            code: "FEATURE_LIMIT_REACHED",
+            feature: "multisucursal",
+            limit,
+            current: activeBranchCount,
+          });
+        }
+      }
+
       const newBranch = await storage.createBranch({ ...result.data, businessId });
       
       await createAuditLog(
@@ -1849,6 +1865,12 @@ precioSugerido es un número. No incluyas el símbolo $. Si no encontrás datos 
         if (plan) planName = plan.name;
       }
 
+      let pendingPlanName: string | null = null;
+      if (business?.pendingPlanId) {
+        const pp = await storage.getPlan(business.pendingPlanId);
+        if (pp) pendingPlanName = pp.name;
+      }
+
       res.json({
         features: featMap, limits: limMap,
         subscription: {
@@ -1857,6 +1879,9 @@ precioSugerido es un número. No incluyas el símbolo $. Si no encontrás datos 
           graceEndsAt: business?.graceEndsAt,
           nextPaymentAt: business?.nextPaymentAt,
           planName,
+          planSlug: business?.plan || "free",
+          pendingPlanId: business?.pendingPlanId || null,
+          pendingPlanName,
         },
       });
     } catch (error: any) {
@@ -2095,6 +2120,162 @@ precioSugerido es un número. No incluyas el símbolo $. Si no encontrás datos 
     }
   });
 
+  // ===== PLAN CHANGE ENDPOINTS =====
+
+  // Helper: calculate proration days
+  function calcDiasRestantes(lastPaymentAt: Date | null): number {
+    if (!lastPaymentAt) return 30;
+    const elapsed = Math.floor((Date.now() - lastPaymentAt.getTime()) / 86400000);
+    return Math.max(0, 30 - elapsed);
+  }
+
+  app.get("/api/subscription/change-plan/preview", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (req.session.userRole !== "admin") return res.status(403).json({ message: "Solo admins pueden cambiar de plan" });
+      const businessId = req.session.businessId;
+      if (!businessId) return res.status(400).json({ message: "Sin negocio en sesión" });
+
+      const { planSlug } = req.query as { planSlug?: string };
+      if (!planSlug) return res.status(400).json({ message: "Se requiere planSlug" });
+
+      const business = await storage.getBusiness(businessId);
+      if (!business) return res.status(404).json({ message: "Negocio no encontrado" });
+
+      const [currentPlanRow] = await db.select().from(plansTable).where(eq(plansTable.id, business.planId!)).limit(1);
+      const [targetPlan] = await db.select().from(plansTable).where(eq(plansTable.slug, planSlug)).limit(1);
+      if (!targetPlan) return res.status(404).json({ message: "Plan no encontrado" });
+
+      const currentPrice = parseFloat(currentPlanRow?.price ?? "0");
+      const targetPrice = parseFloat(targetPlan.price);
+      const diasRestantes = calcDiasRestantes(business.lastPaymentAt);
+      const diasTranscurridos = 30 - diasRestantes;
+      const diferencial = Math.round(((targetPrice - currentPrice) / 30) * diasRestantes);
+      const tipo = targetPrice > currentPrice ? "upgrade" : targetPrice < currentPrice ? "downgrade" : "same";
+
+      res.json({
+        currentPlan: { name: currentPlanRow?.name ?? "Free", price: currentPrice, slug: currentPlanRow?.slug ?? "free" },
+        targetPlan: { name: targetPlan.name, price: targetPrice, slug: targetPlan.slug },
+        diasTranscurridos,
+        diasRestantes,
+        diferencial,
+        tipo,
+        efectivaEn: tipo === "upgrade" ? null : (business.nextPaymentAt?.toISOString() ?? null),
+      });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.post("/api/subscription/change-plan", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (req.session.userRole !== "admin") return res.status(403).json({ message: "Solo admins pueden cambiar de plan" });
+      const businessId = req.session.businessId;
+      if (!businessId) return res.status(400).json({ message: "Sin negocio en sesión" });
+
+      const { planSlug } = req.body;
+      if (!planSlug) return res.status(400).json({ message: "Se requiere planSlug" });
+
+      const business = await storage.getBusiness(businessId);
+      if (!business) return res.status(404).json({ message: "Negocio no encontrado" });
+
+      const [targetPlan] = await db.select().from(plansTable).where(eq(plansTable.slug, planSlug)).limit(1);
+      if (!targetPlan) return res.status(400).json({ message: "Plan no encontrado" });
+
+      let currentPlanRow = null;
+      if (business.planId) {
+        [currentPlanRow] = await db.select().from(plansTable).where(eq(plansTable.id, business.planId)).limit(1);
+      }
+
+      if (currentPlanRow?.slug === planSlug) {
+        return res.status(400).json({ message: "Ya estás en este plan" });
+      }
+
+      const currentPrice = parseFloat(currentPlanRow?.price ?? "0");
+      const targetPrice = parseFloat(targetPlan.price);
+      const diasRestantes = calcDiasRestantes(business.lastPaymentAt);
+      const diferencial = Math.round(((targetPrice - currentPrice) / 30) * diasRestantes);
+
+      // UPGRADE
+      if (diferencial > 0) {
+        const mpAccessToken = process.env.MP_ACCESS_TOKEN;
+        if (!mpAccessToken) {
+          // Dev mode: apply immediately
+          await storage.updateBusiness(businessId, { planId: targetPlan.id, plan: targetPlan.slug, pendingPlanId: null } as any);
+          await storage.createSubscriptionEvent({ businessId, type: "plan_upgrade_applied", description: `Upgrade de ${currentPlanRow?.name ?? "Free"} a ${targetPlan.name} (modo dev)`, amount: String(diferencial) } as any);
+          invalidateFeatureCache(businessId);
+          return res.json({ type: "upgrade_immediate", message: "Plan actualizado exitosamente" });
+        }
+
+        const userEmail = req.session.userEmail || "cliente@example.com";
+        const mpRes = await fetch("https://api.mercadopago.com/v1/payments", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${mpAccessToken}` },
+          body: JSON.stringify({
+            transaction_amount: diferencial,
+            description: `Upgrade de ${currentPlanRow?.name ?? "Free"} a ${targetPlan.name} - ${diasRestantes} días restantes`,
+            payment_method_id: "account_money",
+            payer: { email: userEmail },
+            external_reference: `upgrade_${businessId}_${targetPlan.slug}`,
+            metadata: { businessId, fromPlan: currentPlanRow?.slug ?? "free", toPlan: targetPlan.slug, type: "plan_upgrade" },
+          }),
+        });
+        const mpData = await mpRes.json();
+
+        if (mpData.status === "approved") {
+          await storage.updateBusiness(businessId, { planId: targetPlan.id, plan: targetPlan.slug, pendingPlanId: null } as any);
+          await storage.createSubscriptionEvent({ businessId, type: "plan_upgrade_applied", description: `Upgrade a ${targetPlan.name} - pago aprobado`, amount: String(diferencial) } as any);
+          invalidateFeatureCache(businessId);
+          return res.json({ type: "upgrade_immediate", message: "Plan actualizado exitosamente" });
+        }
+
+        const checkoutUrl = mpData.init_point || mpData.payment_url;
+        if (checkoutUrl) {
+          return res.json({ type: "upgrade", checkoutUrl, diferencial, diasRestantes });
+        }
+
+        // Fallback: apply immediately
+        await storage.updateBusiness(businessId, { planId: targetPlan.id, plan: targetPlan.slug, pendingPlanId: null } as any);
+        await storage.createSubscriptionEvent({ businessId, type: "plan_upgrade_applied", description: `Upgrade a ${targetPlan.name} (fallback)`, amount: String(diferencial) } as any);
+        invalidateFeatureCache(businessId);
+        return res.json({ type: "upgrade_immediate", message: "Plan actualizado exitosamente" });
+      }
+
+      // DOWNGRADE o FREE
+      if (targetPrice === 0 && business.mpSubscriptionId) {
+        try {
+          const { cancelMPSubscription } = await import("./mp-subscriptions");
+          await cancelMPSubscription(business.mpSubscriptionId);
+        } catch {}
+      }
+      await storage.updateBusiness(businessId, { pendingPlanId: targetPlan.id } as any);
+      await storage.createSubscriptionEvent({
+        businessId, type: "plan_downgrade_scheduled",
+        description: `Cambio programado de ${currentPlanRow?.name ?? "Free"} a ${targetPlan.name}`,
+        metadata: JSON.stringify({ fromPlan: currentPlanRow?.slug ?? "free", toPlan: targetPlan.slug, effectiveDate: business.nextPaymentAt }),
+      } as any);
+
+      const efectiva = business.nextPaymentAt?.toLocaleDateString("es-AR") ?? "próximo ciclo";
+      return res.json({ type: "downgrade", message: `El cambio se aplicará el ${efectiva}`, effectiveDate: business.nextPaymentAt });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
+  app.delete("/api/subscription/change-plan/pending", requireAuth, async (req: Request, res: Response) => {
+    try {
+      if (req.session.userRole !== "admin") return res.status(403).json({ message: "Solo admins" });
+      const businessId = req.session.businessId;
+      if (!businessId) return res.status(400).json({ message: "Sin negocio en sesión" });
+      const business = await storage.getBusiness(businessId);
+      if (!business?.pendingPlanId) return res.status(400).json({ message: "No hay cambio pendiente" });
+      await storage.updateBusiness(businessId, { pendingPlanId: null } as any);
+      await storage.createSubscriptionEvent({ businessId, type: "plan_downgrade_cancelled", description: "Cambio de plan pendiente cancelado por el usuario" } as any);
+      res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ message: error.message });
+    }
+  });
+
   // ===== WEBHOOKS =====
   app.post("/api/webhooks/mercadopago", async (req: Request, res: Response) => {
     try {
@@ -2215,17 +2396,24 @@ precioSugerido es un número. No incluyas el símbolo $. Si no encontrás datos 
 
   app.patch("/api/admin/businesses/:id/plan", requireSistemas, async (req: Request, res: Response) => {
     try {
-      const { planId } = req.body;
-      const plan = await storage.getPlan(planId);
+      const { planSlug, planId: legacyPlanId } = req.body;
+      let plan;
+      if (planSlug) {
+        plan = await storage.getPlanBySlug(planSlug);
+      } else if (legacyPlanId) {
+        plan = await storage.getPlan(legacyPlanId);
+      }
       if (!plan) return res.status(404).json({ message: "Plan no encontrado" });
-      const business = await storage.updateBusiness(req.params.id, { plan: plan.slug, planId } as any);
-      if (!business) return res.status(404).json({ message: "Negocio no encontrado" });
+      const existing = await storage.getBusiness(req.params.id);
+      if (!existing) return res.status(404).json({ message: "Negocio no encontrado" });
+      const business = await storage.updateBusiness(req.params.id, { plan: plan.slug, planId: plan.id, pendingPlanId: null } as any);
       await storage.createSubscriptionEvent({
-        businessId: req.params.id, type: "plan_changed",
-        description: `Plan cambiado a ${plan.name} por sistemas`,
+        businessId: req.params.id, type: "plan_changed_by_admin",
+        description: `Plan cambiado manualmente de ${existing.plan} a ${plan.slug}`,
+        metadata: JSON.stringify({ changedBy: req.session.userId }),
       } as any);
       invalidateFeatureCache(req.params.id);
-      res.json(business);
+      res.json({ success: true, plan });
     } catch (error: any) {
       res.status(500).json({ message: error.message });
     }

@@ -9,6 +9,9 @@ interface FeaturesData {
     graceEndsAt?: string | null;
     nextPaymentAt?: string | null;
     planName?: string;
+    planSlug?: string;
+    pendingPlanId?: string | null;
+    pendingPlanName?: string | null;
   };
 }
 

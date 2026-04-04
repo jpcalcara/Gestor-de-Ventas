@@ -7,6 +7,8 @@ import { Plus, Pencil, Trash2, MapPin, Building2, Hash, User } from "lucide-reac
 import { useAuth } from "@/lib/auth";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { useFeatures } from "@/hooks/use-features";
+import { Link } from "wouter";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -86,6 +88,7 @@ interface Business {
 export default function BranchesPage() {
   const { isAdmin, user, businessId } = useAuth();
   const { toast } = useToast();
+  const { getLimit } = useFeatures();
   const isSistemas = user?.role === "sistemas";
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [editingBranch, setEditingBranch] = useState<BranchData | null>(null);
@@ -238,14 +241,26 @@ export default function BranchesPage() {
     );
   }
 
+  const branchLimit = !isSistemas ? getLimit("multisucursal") : null;
+  const activeBranchCount = branches.filter(b => b.isActive).length;
+  const atLimit = user?.role === "admin" && branchLimit !== null && activeBranchCount >= branchLimit;
+
   return (
     <div className="container mx-auto px-4 md:px-8 py-6">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div>
           <h1 className="text-2xl font-semibold">Gestión de Sucursales</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Administra las sucursales del sistema
           </p>
+          {user?.role === "admin" && branchLimit !== null && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {activeBranchCount} de {branchLimit} sucursal{branchLimit === 1 ? "" : "es"} activa{branchLimit === 1 ? "" : "s"} en tu plan
+              {atLimit && (
+                <> · <Link href="/billing" className="text-primary underline">Mejorar plan</Link></>
+              )}
+            </p>
+          )}
         </div>
         <Dialog open={isDialogOpen || !!editingBranch} onOpenChange={(open) => {
           if (!open) {
@@ -254,9 +269,14 @@ export default function BranchesPage() {
             form.reset();
           }
         }}>
-          {isSistemas && (
+          {(isSistemas || user?.role === "admin") && (
             <DialogTrigger asChild>
-              <Button onClick={openCreateDialog} data-testid="button-add-branch">
+              <Button
+                onClick={openCreateDialog}
+                disabled={atLimit}
+                title={atLimit ? `Límite de tu plan: ${branchLimit} sucursal${branchLimit === 1 ? "" : "es"}. Actualizá tu plan para agregar más.` : undefined}
+                data-testid="button-add-branch"
+              >
                 <Plus className="h-4 w-4 mr-2" />
                 Nueva Sucursal
               </Button>

@@ -1,7 +1,8 @@
 import { storage } from "./storage";
 import { db } from "./db";
-import { businesses } from "@shared/schema";
+import { businesses, plans } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { invalidateFeatureCache } from "./features";
 
 export async function processMPWebhook(event: {
   type: string;
@@ -14,7 +15,6 @@ export async function processMPWebhook(event: {
     const paymentId = data?.id;
     if (!paymentId) return;
 
-    // Fetch payment details from MP
     const mpAccessToken = process.env.MP_ACCESS_TOKEN;
     if (!mpAccessToken) return;
 
@@ -27,20 +27,19 @@ export async function processMPWebhook(event: {
     const status = payment.status;
     const subscriptionId = payment.metadata?.preapproval_id || payment.external_reference;
 
-    // Find business by mpSubscriptionId
     const [business] = await db.select().from(businesses)
       .where(eq(businesses.mpSubscriptionId, subscriptionId));
     if (!business) return;
 
     if (status === "approved") {
       const now = new Date();
-      const nextMonth = new Date(now);
-      nextMonth.setMonth(nextMonth.getMonth() + 1);
+      const nextPaymentAt = new Date(now);
+      nextPaymentAt.setDate(nextPaymentAt.getDate() + 30);
 
       await storage.updateBusiness(business.id, {
         subscriptionStatus: "active",
         lastPaymentAt: now,
-        nextPaymentAt: nextMonth,
+        nextPaymentAt,
         graceEndsAt: null,
         mpStatus: "authorized",
       } as any);
@@ -52,6 +51,24 @@ export async function processMPWebhook(event: {
         amount: String(payment.transaction_amount),
         description: `Pago aprobado: $${payment.transaction_amount}`,
       } as any);
+
+      // Aplicar downgrade pendiente si existe
+      if (business.pendingPlanId) {
+        const [pendingPlan] = await db.select().from(plans).where(eq(plans.id, business.pendingPlanId));
+        if (pendingPlan) {
+          await storage.updateBusiness(business.id, {
+            planId: business.pendingPlanId,
+            plan: pendingPlan.slug,
+            pendingPlanId: null,
+          } as any);
+          await storage.createSubscriptionEvent({
+            businessId: business.id,
+            type: "plan_downgrade_applied",
+            description: `Plan cambiado a ${pendingPlan.name} al inicio del nuevo ciclo`,
+          } as any);
+          invalidateFeatureCache(business.id);
+        }
+      }
 
     } else if (status === "rejected" || status === "cancelled") {
       if (business.subscriptionStatus !== "grace_period") {

@@ -18,6 +18,10 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
@@ -93,6 +97,7 @@ export default function BusinessesPage() {
   const [branchDialog, setBranchDialog] = useState<{ open: boolean; businessId: string; editing: BranchItem | null }>({
     open: false, businessId: "", editing: null,
   });
+  const [planChangeTarget, setPlanChangeTarget] = useState<{ businessId: string; businessName: string; newPlan: string } | null>(null);
 
   const { data: businesses = [], isLoading } = useQuery<BusinessWithBranches[]>({
     queryKey: ["/api/businesses-with-branches"],
@@ -193,6 +198,18 @@ export default function BusinessesPage() {
     onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
   });
 
+  // ── Cambio de plan (sistemas) ────────────────────────────────────────────────
+  const changePlanMutation = useMutation({
+    mutationFn: ({ businessId, planSlug }: { businessId: string; planSlug: string }) =>
+      apiRequest("PATCH", `/api/admin/businesses/${businessId}/plan`, { planSlug }),
+    onSuccess: () => {
+      invalidateAll();
+      toast({ title: "Plan actualizado" });
+      setPlanChangeTarget(null);
+    },
+    onError: (e: Error) => toast({ title: "Error", description: e.message, variant: "destructive" }),
+  });
+
   if (user?.role !== "sistemas") {
     return (
       <div className="container mx-auto px-4 py-8">
@@ -282,6 +299,23 @@ export default function BusinessesPage() {
 
                     {/* Actions */}
                     <div className="flex items-center gap-1 shrink-0" onClick={e => e.stopPropagation()}>
+                      <Select
+                        value={biz.plan}
+                        onValueChange={(newPlan) => {
+                          if (newPlan !== biz.plan) {
+                            setPlanChangeTarget({ businessId: biz.id, businessName: biz.razonSocial, newPlan });
+                          }
+                        }}
+                      >
+                        <SelectTrigger className="h-7 text-xs w-24" data-testid={`select-plan-${biz.id}`}>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="free">Free</SelectItem>
+                          <SelectItem value="starter">Starter</SelectItem>
+                          <SelectItem value="pro">Pro</SelectItem>
+                        </SelectContent>
+                      </Select>
                       <Button size="sm" variant="ghost" onClick={() => openBizEdit(biz)} data-testid={`button-edit-business-${biz.id}`}>
                         <Pencil className="h-3.5 w-3.5 mr-1" />
                         Editar
@@ -471,6 +505,28 @@ export default function BusinessesPage() {
           </Form>
         </DialogContent>
       </Dialog>
+
+      {/* Plan change AlertDialog for sistemas */}
+      <AlertDialog open={!!planChangeTarget} onOpenChange={open => { if (!open) setPlanChangeTarget(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cambiar plan</AlertDialogTitle>
+            <AlertDialogDescription>
+              ¿Cambiar el plan de <strong>{planChangeTarget?.businessName}</strong> a <strong>{planChangeTarget?.newPlan}</strong>? Este cambio es inmediato y no genera cobro al cliente.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => planChangeTarget && changePlanMutation.mutate({ businessId: planChangeTarget.businessId, planSlug: planChangeTarget.newPlan })}
+              disabled={changePlanMutation.isPending}
+              data-testid="button-confirm-plan-change"
+            >
+              {changePlanMutation.isPending ? "Guardando..." : "Confirmar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

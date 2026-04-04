@@ -170,6 +170,7 @@ export const businesses = pgTable("businesses", {
   lastPaymentAt: timestamp("last_payment_at"),
   nextPaymentAt: timestamp("next_payment_at"),
   gracePeriodDays: integer("grace_period_days").notNull().default(7),
+  pendingPlanId: varchar("pending_plan_id").references(() => plans.id),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow(),
 });
