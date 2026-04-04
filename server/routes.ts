@@ -1322,7 +1322,7 @@ precioSugerido es un número. No incluyas el símbolo $. Si no encontrás datos 
         "sucursal",
         newBranch.id,
         `Sucursal creada: ${newBranch.name}`,
-        newBranch.businessId
+        newBranch.id
       );
       
       res.status(201).json(newBranch);

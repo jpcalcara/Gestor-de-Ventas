@@ -958,17 +958,13 @@ export class DatabaseStorage implements IStorage {
 
     if (role === "admin") {
       // Admins ven sucursales donde:
-      // 1. Son adminUserId del negocio (business.adminUserId)
-      // 2. Son adminUserId de la sucursal directamente (branch.adminUserId)
-      // 3. Están asignados vía userBranches
+      // 1. Son adminUserId del negocio al que pertenece la sucursal
+      // 2. Están asignados vía userBranches
       return await db
         .select()
         .from(branches)
         .where(or(
-          eq(branches.businessId, 
-            sql`(SELECT id FROM businesses WHERE admin_user_id = ${userId})`
-          ),
-          eq(branches.adminUserId, userId),
+          sql`${branches.businessId} IN (SELECT id FROM businesses WHERE admin_user_id = ${userId})`,
           sql`${branches.id} IN (SELECT branch_id FROM user_branches WHERE user_id = ${userId})`
         ))
         .orderBy(branches.number);
